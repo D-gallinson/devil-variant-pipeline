@@ -26,14 +26,15 @@ module add apps/bwa
 # then the script must be modified to reflect this.
 #############################################################
 
+SHARES_BGFS=/shares_bgfs/margres_lab/Devils/BEE_Probe_Data
 PICARD=${HOME}/tools/picard/build/libs/picard.jar
 target=${WORK_BGFS}/data/intervals/All_targets_combined_WashU_Tasmanian_Devil_TE-91244716_SNP_Indel_Exons_backbone_SarHar1_1_new6_Picard.interval_list
 probe=${WORK_BGFS}/data/intervals/Probe_Placement_WashU_Tasmanian_Devil_TE-91244716_SNP_Indel_Exons_backbone_SarHar1_1_197175_sorted_new6_Picard.intervals
 ref=${WORK_BGFS}/outputs/intermediates/bwa-ref/S_harrisii
 
-batch=Capture1_6-11-21 #change between runs
-input=${WORK_BGFS}/outputs/intermediates/${batch}/3_trim
-output_intermediate=${WORK_BGFS}/outputs/intermediates/${batch}/5_align
+batch=Capture1_6-11-21 #Change between runs
+input=${SHARES_BGFS}/${batch}/3_trim
+output_intermediate=${SHARES_BGFS}/${batch}/5_align
 output_result=${WORK_BGFS}/outputs/results/${batch}/align
 
 forward_array=(${input}/*_S${SLURM_ARRAY_TASK_ID}_*R1*)

@@ -16,7 +16,8 @@ module purge
 module add apps/python/3.8.5
 
 batch=Capture1_6-11-21   #change between runs
-src=${WORK_BGFS}/outputs/intermediates/${batch}/3_trim
+SHARES_BGFS=/shares_bgfs/margres_lab/Devils/BEE_Probe_Data
+src=${SHARES_BGFS}/${batch}/3_trim
 dest=${WORK_BGFS}/outputs/results/${batch}/qc/post
 out_dir=MultiQC
 

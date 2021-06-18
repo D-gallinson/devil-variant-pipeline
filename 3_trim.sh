@@ -27,13 +27,13 @@
 module purge
 module add apps/trimgalore/0.4.4
 
-batch_name=Capture1_6-11-21  #change between runs
-batch=${batch_name}   #change between runs
-input_dir=${WORK_BGFS}/data/${batch}
-output=${WORK_BGFS}/outputs/intermediates/${batch_name}/3_trim
+batch=Capture1_6-11-21  #Change between runs
+SHARES_BGFS=/shares_bgfs/margres_lab/Devils/BEE_Probe_Data
+input_dir=${SHARES_BGFS}/${batch}
+output=${SHARES_BGFS}/${batch}/3_trim
 
 #Generate an array of all R1 reads in $input_dir. The PE R2 read is generated through string replacement
-forward_array=(${input_dir}/*/*R1*.fastq.gz)
+forward_array=(${input_dir}/reads_1/*R1*.fastq.gz)
 forward=${forward_array[$SLURM_ARRAY_TASK_ID]}
 reverse=${forward//R1/R2}
 

@@ -17,7 +17,7 @@ batch=Capture1_6-11-21   #change between runs
 SHARES_BGFS=/shares_bgfs/margres_lab
 index=${WORK_BGFS}/data/Sarcophilus_harrisii.mSarHar1.11.dna_sm.toplevel.fa
 
-input_array=(${WORK_BGFS}/outputs/intermediates/${batch}/5_align/*dups.bam)
+input_array=(${SHARES_BGFS}/${batch}/5_align/*dups.bam)
 input=${input_array[$SLURM_ARRAY_TASK_ID]}
 
 output_dir=${SHARES_BGFS}/Devils/BEE_Probe_Data/gvcf
