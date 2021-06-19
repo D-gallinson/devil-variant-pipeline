@@ -1,2 +1,2 @@
 # devil-variant-pipeline
-Pipeline to process NGS data and perform joint variant calling
+Pipeline to process NGS probe-capture data derived from Tasmanian Devils and DFTD samples.
