@@ -4,12 +4,12 @@
 #SBATCH --qos=margres20
 #SBATCH --mail-user=dgallinson@usf.edu
 #SBATCH --mail-type=END,FAIL
-#SBATCH --output=scripts/master/logs/1_setup.out
-#SBATCH --error=scripts/master/logs/1_setup.err
+#SBATCH --output=scripts/master/logs/Capture1_6-11-21/out/1_setup.out
+#SBATCH --error=scripts/master/logs/Capture1_6-11-21/err/1_setup.err
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=186G
+#SBATCH --mem=50G
 #SBATCH --time=30:00
 
 module purge
@@ -57,14 +57,13 @@ results=${WORK_BGFS}/outputs/results
 subdirs=(qc qc/pre qc/post qc/post/fastqc qc/post/trimming qc/post/MultiQC align align/flagstat align/duplicates align/HS-metrics align/MultiQC)
 
 # mkdir ${results}/${batch}
-for subdir in ${subdirs[@]}
-do
-    mkdir ${results}/${batch}/${subdir}
-done
+# for subdir in ${subdirs[@]}
+# do
+#     mkdir ${results}/${batch}/${subdir}
+# done
 
 #Generate dir structure in SHARE_BGFS/batch
 subdirs=(3_trim 5_align)
-
 for subdir in ${subdirs[@]}
 do
     mkdir ${data_path}/${subdir}

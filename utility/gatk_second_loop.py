@@ -10,7 +10,8 @@ import re
 
 HOME = "/home/d/dgallinson"
 WORK_BGFS = "/work_bgfs/d/dgallinson"
-BASE = f"{WORK_BGFS}/outputs/intermediates/8_joint-variants"
+SHARES = "/shares_bgfs/margres_lab/Devils/BEE_Probe_Data"
+BASE = f"{SHARES}/joint-variants"
 
 gatk = f"{HOME}/tools/gatk-4.2.0.0/./gatk"
 input = os.getcwd()
@@ -32,52 +33,35 @@ else:
 	print("Error, please specify a \"T\" for tumor samples or an \"H\" host samples. Exiting.")
 	exit()
 
+genomicsDB_path = f"{BASE}/genomicsDB-{sample_type}"
 samples = [file for file in samples if file.endswith(".g.vcf") and re.match(pattern, file)]
 print("Found " + str(len(samples)) + " samples")
 
 #GVCF consolidation
 start = time.perf_counter()
 sampleList = " "
-for sample in samples:
+for sample in samples[8:]:
     sampleList = sampleList + "-V " + sample + " "
+# for sample in samples:
+#     sampleList = sampleList + "-V " + sample + " "
 
-genomicsDB_path = f"{BASE}/genomicsDB-{sample_type}"
-
-#Checkpoint, check if a genomicsDB dir exists and if it is populated
-genomicsDB_flag = os.path.exists(genomicsDB_path)
-genomicsDB_contents = False
-if genomicsDB_flag:
-	if os.listdir(genomicsDB_path):
-		genomicsDB_contents = True
-
-if not genomicsDB_contents:
-	command = f"{gatk} --java-options \"-Xmx30g\" GenomicsDBImport {sampleList} --genomicsdb-workspace-path {genomicsDB_path} --intervals {intervals} --reader-threads 4"
-	print(command)
-	subprocess.call(command,shell=True)
-else:
-	print("Found a genomicsDB directory with contents, assuming checkpoint and skipping \"GenomicsDBImport\" step")
+# Check below for RAM
+# command = f"{gatk} --java-options \"-Xmx30g\" GenomicsDBImport {sampleList} --genomicsdb-workspace-path {genomicsDB_path} --intervals {intervals} --genomicsdb-shared-posixfs-optimizations true"
+command = f"{gatk} --java-options \"-Xmx30g\" GenomicsDBImport {sampleList} --genomicsdb-update-workspace-path {genomicsDB_path} --genomicsdb-shared-posixfs-optimizations true"
+print(command)
+subprocess.call(command,shell=True)
+subprocess.call(f"chmod -R g+rwx {genomicsDB_path}", shell=True)
 
 delta = time.perf_counter() - start
 print(f"GenomicsDBImport execution time: {delta:.0f}s")
-
 
 #Joint genotyping
 start = time.perf_counter()
 geno_out = f"{BASE}/output-{sample_type}.vcf"
 
-#Checkpoint, check if the output file exists and has data
-geno_out_flag = os.path.exists(geno_out)
-geno_out_contents = False
-if geno_out_flag:
-	if os.path.getsize(geno_out) > 0:
-		geno_out_contents = True
-
-if not geno_out_contents:
-	command = f"{gatk} GenotypeGVCFs -R {index} -V gendb://{genomicsDB_path} -O {geno_out}"
-	print(command)
-	subprocess.call(command,shell=True)
-else:
-	print(f"Found GenotypeGVCFs output with bytes > 0 ({geno_out}), assuming checkpoint and skipping \"GenotypeGVCFs\" step")
+command = f"{gatk} GenotypeGVCFs -R {index} -V gendb://{genomicsDB_path} -O {geno_out}"
+print(command)
+subprocess.call(command,shell=True)
 
 delta = time.perf_counter() - start
 print(f"GenotypeGVCFs execution time: {delta:.0f}s")
