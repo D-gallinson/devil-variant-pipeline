@@ -185,7 +185,6 @@ mean = sum(accuracy) / len(accuracy)
 std = math.sqrt(sum([(acc - mean)**2 for acc in accuracy]) / len(accuracy))
 print(f"\nAccuracy mean: {mean:.2f}%")
 print(f"Accuracy std: {std:.2f}%")
-print(f"Execution time: {delta:.2f}s")
 
 output = f"{args.output}.beagle_test.tabular"
 print(f"\nWriting accuracy report to {output}", end="")
