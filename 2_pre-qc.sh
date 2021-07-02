@@ -14,15 +14,14 @@
 module purge
 module add apps/fastqc/0.11.5
 
-batch=Capture1_6-11-21  #Change between runs
-SHARES_BGFS=/shares_bgfs/margres_lab/Devils/BEE_Probe_Data
-input=${SHARES_BGFS}/${batch}/reads_1/*.fastq.gz
-output=${WORK_BGFS}/outputs/results/${batch_name}/qc
+source ${WORK_BGFS}/scripts/master/main.env
+
+input=${DATA}/${batch}/reads_1/*.fastq.gz
+output=${RESULTS}/${batch_name}/qc
 
 #mv 1_cp.sh log files to proper logs/batch
-logs=${WORK_BGFS}/scripts/master/logs
-mv ${logs}/1_cp.out ${logs}/${batch}/out
-mv ${logs}/1_cp.err ${logs}/${batch}/err
+mv ${LOGS}/1_cp.out ${LOGS}/${batch}/out
+mv ${LOGS}/1_cp.err ${LOGS}/${batch}/err
 
 #FastQC
 fastqc \

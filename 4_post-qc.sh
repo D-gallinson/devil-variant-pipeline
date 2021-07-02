@@ -15,10 +15,10 @@
 module purge
 module add apps/python/3.8.5
 
-batch=Capture1_6-11-21   #change between runs
-SHARES_BGFS=/shares_bgfs/margres_lab/Devils/BEE_Probe_Data
-src=${SHARES_BGFS}/${batch}/3_trim
-dest=${WORK_BGFS}/outputs/results/${batch}/qc/post
+source ${WORK_BGFS}/scripts/master/main.env
+
+src=${DATA}/${batch}/3_trim
+dest=${RESULTS}/${batch}/qc/post
 out_dir=MultiQC
 
 #mv fastqc and trimming reports from intermediates directory to results directory

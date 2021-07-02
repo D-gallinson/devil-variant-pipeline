@@ -12,13 +12,16 @@
 #SBATCH --mem=30G
 #SBATCH --time=14-00:00:00
 
+module purge
 module add apps/python/3.8.5
+
+source ${WORK_BGFS}/scripts/master/main.env
 
 start=`date +%s`
 
 #Run joint variant calling (GenomicsDBImport, GenotypeGVCFs, and hard filters)
 mode=T #change to "H" for host run and "T" for tumor run
-python3 ${WORK_BGFS}/scripts/master/utility/gatk_second_loop.py $mode
+python3 ${SCRIPTS}/utility/gatk_second_loop.py $mode
 
 end=`date +%s`
 printf "Execution time: $((end-start))s"

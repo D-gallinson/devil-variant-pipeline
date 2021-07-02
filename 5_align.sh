@@ -16,6 +16,10 @@
 module purge
 module add apps/bwa
 
+source ${WORK_BGFS}/scripts/master/main.env
+source ${WORK_BGFS}/scripts/master/refs.env
+source ${WORK_BGFS}/scripts/master/tools.env
+
 ########################## Note #############################
 # This script processes each sample in parallel,
 # but iterates through the PE lanes of a sample.
@@ -26,16 +30,9 @@ module add apps/bwa
 # then the script must be modified to reflect this.
 #############################################################
 
-SHARES_BGFS=/shares_bgfs/margres_lab/Devils/BEE_Probe_Data
-PICARD=${HOME}/tools/picard/build/libs/picard.jar
-target=${WORK_BGFS}/data/intervals/All_targets_combined_WashU_Tasmanian_Devil_TE-91244716_SNP_Indel_Exons_backbone_SarHar1_1_new6_Picard.interval_list
-probe=${WORK_BGFS}/data/intervals/Probe_Placement_WashU_Tasmanian_Devil_TE-91244716_SNP_Indel_Exons_backbone_SarHar1_1_197175_sorted_new6_Picard.intervals
-ref=${WORK_BGFS}/outputs/intermediates/bwa-ref/S_harrisii
-
-batch=Capture1_6-11-21 #Change between runs
-input=${SHARES_BGFS}/${batch}/3_trim
-output_intermediate=${SHARES_BGFS}/${batch}/5_align
-output_result=${WORK_BGFS}/outputs/results/${batch}/align
+input=${DATA}/${batch}/3_trim
+output_intermediate=${DATA}/${batch}/5_align
+output_result=${RESULTS}/${batch}/align
 
 forward_array=(${input}/*_S${SLURM_ARRAY_TASK_ID}_*R1*)
 microchip_id=$(echo ${forward_array[0]} | awk '{print $NF}' FS=/ | grep -o -E '[TH]{0,1}[0-9]*-{0,1}[0-9]+' | head -n 1) #Get microchip ID (including tumorID if it exists)
@@ -64,12 +61,12 @@ do
         -M \
         -v 3 \
         -R "@RG\tID:${rg}\tSM:${microchip_id}\tLB:${microchip_id}_1\tPL:ILLUMINA" \
-        $ref \
+        $BWA_REF \
         $forward $reverse \
         > $sam_out
 
     #Generate alignment stats
-    ${HOME}/tools/samtools-1.12/./samtools flagstat \
+    $SAMTOOLS flagstat \
         -@ 3 \
         $sam_out \
         > ${output_result}/flagstat/${outname}-stats.txt
@@ -93,8 +90,7 @@ java -jar $PICARD MarkDuplicates \
 rm ${output_intermediate}/${microchip_id}_L00*.sorted.bam
 
 #Generate BAM index (.csi due to large contig size)
-${HOME}/tools/samtools-1.12/./samtools \
-    index \
+SAMTOOLS index \
     -@ 3 \
     -c \
     ${output_intermediate}/${microchip_id}.dups.bam
@@ -103,8 +99,8 @@ ${HOME}/tools/samtools-1.12/./samtools \
 java -jar $PICARD CollectHsMetrics \
     INPUT=${output_intermediate}/${microchip_id}.dups.bam \
     OUTPUT=${output_result}/HS-metrics/${microchip_id}.txt \
-    BAIT_INTERVALS=$probe \
-    TARGET_INTERVALS=$target
+    BAIT_INTERVALS=$PROBE \
+    TARGET_INTERVALS=$TARGET
 
 end=`date +%s`
 printf "Execution time: $((end-start))s"

@@ -5,6 +5,7 @@ import argparse as ag
 import math
 import subprocess
 import time
+from utility import Env
 
 
 pd.options.mode.chained_assignment = None
@@ -96,7 +97,8 @@ def missing_vcf(genos, missing_list):
 # =========================== MAIN ===========================
 def main(truth_df, freq_model, tmp_id="", output="", phased=False, nrows=None):
 	# Constants
-	BEAGLE = "/home/d/dgallinson/tools/beagle.jar"
+	tools_env = Env("tools.env")
+	BEAGLE = tools_env.get_var("BEAGLE")
 
 	truth_geno_df = truth_df[truth_df.columns[9:]]
 	samples = truth_geno_df.shape[1]

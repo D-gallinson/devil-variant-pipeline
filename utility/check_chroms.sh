@@ -1,9 +1,16 @@
-chroms="${WORK_BGFS}/data/devil_chromosomes.txt"
-vcf="${WORK_BGFS}/outputs/intermediates/8_joint-variants/impute/truth_clean_final.vcf"
-out="truth_clean.chroms"
+source ${WORK_BGFS}/scripts/master/refs.env
+
+if echo "$1" | grep -q "\."
+then
+    prefix=$(echo $1 | awk 'BEGIN{FS=OFS="."} NF--')
+else
+    prefix="$1"
+fi
+
+out="${prefix}.check_chroms"
 
 printf "" > $out
 while read l
 do
-    echo "$l = `grep -c -P "^$l" $vcf`" >> $out
-done <$chroms
+    echo "$l = `grep -c -P "^$l" $1`" >> $out
+done < $CRHOMS

@@ -15,12 +15,13 @@
 module purge
 module add apps/python/3.8.5
 
-batch=Capture1_6-11-21   #change between runs
-align=${WORK_BGFS}/outputs/results/${batch}/align
+source ${WORK_BGFS}/scripts/master/main.env
+
+align=${RESULTS}/${batch}/align
 out_dir=MultiQC
 
 #Generate HSMetrics summary file (my custom python script)
-python3 ${WORK_BGFS}/scripts/master/utility/combine-hs.py ${align}/HS-metrics ${align}/HS_summary.csv
+python3 ${SCRIPTS}/utility/combine-hs.py ${align}/HS-metrics ${align}/HS_summary.csv
 
 #MultiQC flagstat, duplicates stats, and HsMetrics
 multiqc \

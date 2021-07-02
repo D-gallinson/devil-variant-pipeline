@@ -11,14 +11,15 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=30G
 
-
 module purge
 module load apps/vcftools
 module load apps/python/3.8.5
 
+source ${WORK_BGFS}/scripts/master/main.env
+
 # Configurable
 input_vcf="input.vcf"
-py_script="${WORK_BGFS}/scripts/master/utility/beagle_acc.py"
+py_script="${SCRIPTS}/utility/beagle_acc.py"
 missing=0.5
 iters=10
 

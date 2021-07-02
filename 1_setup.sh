@@ -15,11 +15,9 @@
 module purge
 module load apps/python/3.8.5
 
-batch=Capture1_6-11-21   #change between runs
-csv=Cap_libraries_pools_1-2.csv   #change between runs
+source ${WORK_BGFS}/scripts/master/main.env
 
-SHARES_BGFS=/shares_bgfs/margres_lab/Devils/BEE_Probe_Data
-data_path=${SHARES_BGFS}/${batch}
+data_path=${DATA}/${batch}
 
 # Generate file containing the original read directory structure
 read_dirs=($(ls $data_path | grep -v '.[csvtxt]$'))
@@ -43,9 +41,8 @@ rm -d ${data_path}/*/
 
 #Rename files
 name_csv=${data_path}/${csv}
-utility=${WORK_BGFS}/scripts/master/utility
 
-python3 scripts/master/utility/rename.py \
+python3 ${SCRIPTS}/utility/rename.py \
     --id-col "Library number" \
     --rename-col "ID" \
     -r \
@@ -53,14 +50,13 @@ python3 scripts/master/utility/rename.py \
     $name_csv
 
 #Generate dir structure in outputs/results
-results=${WORK_BGFS}/outputs/results
 subdirs=(qc qc/pre qc/post qc/post/fastqc qc/post/trimming qc/post/MultiQC align align/flagstat align/duplicates align/HS-metrics align/MultiQC)
 
-# mkdir ${results}/${batch}
-# for subdir in ${subdirs[@]}
-# do
-#     mkdir ${results}/${batch}/${subdir}
-# done
+mkdir ${results}/${batch}
+for subdir in ${subdirs[@]}
+do
+    mkdir ${results}/${batch}/${subdir}
+done
 
 #Generate dir structure in SHARE_BGFS/batch
 subdirs=(3_trim 5_align)
@@ -70,14 +66,13 @@ do
 done
 
 #Generate dir structure in logs
-logs=${WORK_BGFS}/scripts/master/logs
 subdirs=(3_trim 5_align 7_gvcf)
 
-mkdir ${logs}/${batch}
-mkdir ${logs}/${batch}/out
-mkdir ${logs}/${batch}/err
+mkdir ${LOGS}/${batch}
+mkdir ${LOGS}/${batch}/out
+mkdir ${LOGS}/${batch}/err
 for subdir in ${subdirs[@]}
 do
-    mkdir ${logs}/${batch}/out/${subdir}
-    mkdir ${logs}/${batch}/err/${subdir}
+    mkdir ${LOGS}/${batch}/out/${subdir}
+    mkdir ${LOGS}/${batch}/err/${subdir}
 done

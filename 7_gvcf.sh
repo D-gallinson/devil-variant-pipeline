@@ -13,22 +13,21 @@
 #SBATCH --time=6-23:00:00
 #SBATCH --array=0-191
 
-batch=Capture1_6-11-21   #change between runs
-SHARES_BGFS=/shares_bgfs/margres_lab
-index=${WORK_BGFS}/data/Sarcophilus_harrisii.mSarHar1.11.dna_sm.toplevel.fa
+source ${WORK_BGFS}/scripts/master/main.env
+source ${WORK_BGFS}/scripts/master/refs.env
+source ${WORK_BGFS}/scripts/master/tools.env
 
-input_array=(${SHARES_BGFS}/${batch}/5_align/*dups.bam)
+input_array=(${DATA}/${batch}/5_align/*dups.bam)
 input=${input_array[$SLURM_ARRAY_TASK_ID]}
 
-output_dir=${SHARES_BGFS}/Devils/BEE_Probe_Data/gvcf
+output_dir=${DATA}/gvcf
 output_name=$(echo $input | awk '{printf $NF}' FS=/ | grep -o '^[^\.]*') #Grab T#ID_microchip (or just microchip)
 output=${output_dir}/${output_name}.g.vcf
 
 start=`date +%s`
 
-${HOME}/tools/gatk-4.2.0.0/./gatk \
-    HaplotypeCaller \
-    -R ${index} \
+${GATK} HaplotypeCaller \
+    -R ${REF} \
     -I ${input} \
     -O ${output} \
     -ERC GVCF \

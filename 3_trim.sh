@@ -27,10 +27,10 @@
 module purge
 module add apps/trimgalore/0.4.4
 
-batch=Capture1_6-11-21  #Change between runs
-SHARES_BGFS=/shares_bgfs/margres_lab/Devils/BEE_Probe_Data
-input_dir=${SHARES_BGFS}/${batch}
-output=${SHARES_BGFS}/${batch}/3_trim
+source ${WORK_BGFS}/scripts/master/main.env
+
+input_dir=${DATA}/${batch}
+output=${DATA}/${batch}/3_trim
 
 #Generate an array of all R1 reads in $input_dir. The PE R2 read is generated through string replacement
 forward_array=(${input_dir}/reads_1/*R1*.fastq.gz)
