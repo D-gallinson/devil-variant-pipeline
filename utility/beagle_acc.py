@@ -1,3 +1,4 @@
+# Test BEAGLE imputation accuracy using a custom VCF input file
 import numpy as np
 import pandas as pd
 import argparse as ag
@@ -9,6 +10,7 @@ import time
 pd.options.mode.chained_assignment = None
 
 # =========================== CLASSES/FUNCTIONS ===========================
+# Class to generate the probability model
 class MissingModel:
 	def __init__(self):
 		pass
@@ -71,19 +73,16 @@ class ModelError(Exception):
 
 
 
+# Load the ground truth VCF
 def truth_vcf(path, nrows=None):
 	subprocess.call("sed -i '0,/#CHROM/{s/#CHROM/CHROM/}' " + path, shell=True)
 	df = pd.read_csv(path, sep="\t", comment="#", dtype=str, nrows=nrows)
 	subprocess.call("sed -i '0,/CHROM/{s/CHROM/#CHROM/}' " + path, shell=True)
 	df = df.rename(columns={"CHROM": "#CHROM"})
 	return df
-	"""
-	samples = len(df.columns[9:])
-	truth_geno_df = df[df.columns[9:]]
-	total_genos = truth_geno_df.shape[0] * truth_geno_df.shape[1]	
-	"""
 
 
+# Convert genotypes to missing to generate the test VCF
 def missing_vcf(genos, missing_list):
 	missing_genos = genos.copy()
 	for i in range(len(missing_list)):
@@ -99,28 +98,9 @@ def main(truth_df, freq_model, tmp_id="", output="", phased=False, nrows=None):
 	# Constants
 	BEAGLE = "/home/d/dgallinson/tools/beagle.jar"
 
-	# Read in VCF to be filled with missing samples (this file should have no missing values to begin with)
-	"""
-	subprocess.call("sed -i '0,/#CHROM/{s/#CHROM/CHROM/}' " + input, shell=True)
-	subprocess.call("sed -i 's/0\/1/1\/0/g' " + input, shell=True)
-	df = pd.read_csv(input, sep="\t", comment="#", dtype=str, nrows=nrows)
-	subprocess.call("sed -i '0,/CHROM/{s/CHROM/#CHROM/}' " + input, shell=True)
-	df = df.rename(columns={"CHROM": "#CHROM"})
-	samples = len(df.columns[9:])
-	truth_geno_df = df[df.columns[9:]]
-	total_genos = truth_geno_df.shape[0] * truth_geno_df.shape[1]
-	"""
-
 	truth_geno_df = truth_df[truth_df.columns[9:]]
 	samples = truth_geno_df.shape[1]
 	total_genos = truth_geno_df.shape[0] * truth_geno_df.shape[1]
-
-	# Use a file to obtain frequencies of missing samples (this should be the same file used to generate "input" 
-	# but with --max-missing set to the desired level of allowed missing genotypes)
-	"""
-	missing_df = pd.read_csv(freq_model_file, nrows=nrows) // 2
-	missing_freqs = get_freq(missing_df, samples, display=display_mode)
-	"""
 
 	# Artificially create missing samples (genotypes) in "input"
 	missing_vector = np.random.choice(list(freq_model.keys()), p=list(freq_model.values()), size=len(truth_geno_df))
