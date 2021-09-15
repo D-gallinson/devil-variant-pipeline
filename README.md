@@ -11,4 +11,9 @@ hosts and the tumors.
 5_align.sh [Align reads and generate sorted BAMs with marked duplicates as follows: BWA MEM > Picard SortSam > Picard MarkDuplicates]<br/>
 6_combine.sh [Combine reports from 5_align using MultiQC and a custom script for summarizing Picard CollectHsMetrics]<br/>
 7_gvcf.sh [Generate variant calls using HaplotypeCaller]<br/>
-8_joint-variants.sh [Joint variant calling using GenomicsDBImport and GenotypeGVCFs]<br/>
+8_genomicsDB.sh [Create/update a tumor or host genomicsDB]<br/>
+9a_genotypeGVCFs.sh [Run GenotypeGVCFs, processing equal bp regions of the genome in parallel]<br/>
+9b_genotypeGVCFs.sh [Combine the jointly genotyped regions, separate indels and SNPs, and apply basic hard filters]<br/>
+10_variant_stats.sh [Generate tables and figures for a VCF (this is essential for proper filtering)]<br/>
+ATOMM.sh [TODO: automate ATOMM run, including subsetting SNPs for interaction test via marginal tests]<br/>
+gemma.sh [Run GEMMA BSLMM either on all samples or using leave one out blocked xval. TODO: generate pheno predictions, calculate accuracy]<br/>
