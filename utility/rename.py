@@ -7,19 +7,20 @@ import re
 
 
 class Rename:
-	def __init__(self, root, name_path, id_col_name, rename_col_name, tissue_col_name, tumor_id_col_name, interactive_mode, old_csv_mode, undo_flag):
+	def __init__(self, root, name_path, id_col_name, rename_col_name, tissue_col_name, tumor_id_col_name, full_names, interactive_mode, undo_flag):
 		self.interactive_mode = interactive_mode
 		rename_df = pd.read_csv(name_path, dtype=str)
 		
-		if old_csv_mode:
-			pass
-		elif undo_flag:
-			self.rename_list = rename_df["original"]
-			id_col_name = "rename"
-		else:
-			renames = rename_df[rename_col_name]
+		if not undo_flag:
+			if full_names:
+				renames = rename_df[rename_col_name]
+			else:
+				renames = self.__gen_names(rename_df, rename_col_name, tissue_col_name, tumor_id_col_name)
 			tIDs = rename_df[tumor_id_col_name]
 			self.rename_list = self.__gen_rename_tID(renames, tIDs)
+		else:
+			self.rename_list = rename_df["original"]
+			id_col_name = "rename"
 		self.target_list = rename_df[id_col_name]
 
 
@@ -42,6 +43,13 @@ class Rename:
 		name_df = self.read_csv(csv_path)
 		targets = name_df["rename"]
 		rename = name_df["original"]
+
+
+	def __gen_names(self, df, rename_col, tissue_col, tumor_id_col):
+		chips = df[rename_col].str[-6:]
+		ids = df[tissue_col].str[0]
+		names = ids + "-" + chips
+		return names
 
 
 	def __gen_rename_tID(self, renames, tIDs):
@@ -122,12 +130,12 @@ class Rename:
 parser = ag.ArgumentParser(description="Rename files specified by a CSV")
 parser.add_argument("path", help="Directory path for files to be renamed")
 parser.add_argument("rename_csv", help="Path to the CSV to guide renaming")
-parser.add_argument("-ic", "--id-col", dest="id_col_name", default="Library_number", help="Name of the ID column in the CSV file [default=Library_number]")
+parser.add_argument("-ic", "--id-col", dest="id_col_name", default="Library number", help="Name of the ID column in the CSV file [default=Library number]")
 parser.add_argument("-rc", "--rename-col", dest="rename_col_name", default="Microchip", help="Name of the rename column in the CSV file [default=Microchip]")
 parser.add_argument("-tc", "--tissue-col", dest="tissue_col_name", default="Tissue", help="Name of the tissue column in the CSV file [default=Tissue]")
-parser.add_argument("-tid", "--tid-col", dest="tumor_id_col_name", default="Tumour number", help="Name of the tumor ID column in the CSV file [default=Tumour number]")
+parser.add_argument("-tid", "--tid-col", dest="tumor_id_col_name", default="TumourNumber", help="Name of the tumor ID column in the CSV file [default=TumourNumber]")
+parser.add_argument("-f", "--full-names", dest="full_names_flag", action="store_true", help="Used when the names are properly formatted: T#ID_Microchip[-6:]")
 parser.add_argument("-i", "--interactive", dest="interactive_flag", action="store_true", help="Use the tool in interactive mode")
-parser.add_argument("-o", "--old-csv", dest="old_csv_flag", action="store_true", help="Use the tool on the old CSV format (the rename_col was spread between multiple columns)")
 parser.add_argument("-r", "--recursive", dest="recur_flag", action="store_true", help="Flag to search subdirectories recursively")
 parser.add_argument("-u", "--undo", dest="undo_flag", action="store_true", help="Undo renaming. Supply the parent directory containing all renamed files and the path to the rename_key.csv")
 args = parser.parse_args()
@@ -139,8 +147,8 @@ rObj = Rename(
 	args.rename_col_name,
 	args.tissue_col_name,
 	args.tumor_id_col_name,
+	args.full_names_flag,
 	args.interactive_flag,
-	args.old_csv_flag,
 	args.undo_flag
 )
 
