@@ -3,22 +3,24 @@
 #SBATCH --partition=margres_2020
 #SBATCH --qos=margres20
 #SBATCH --mail-user=dgallinson@usf.edu
-#SBATCH --mail-type=START,END,FAIL
-#SBATCH --output=scripts/master/logs/Capture1_6-11-21/out/5_align/%a_align.out
-#SBATCH --error=scripts/master/logs/Capture1_6-11-21/err/5_align/%a_align.err
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture4/out/5_align/%a_align.out
+#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture4/err/5_align/%a_align.err
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=3
-#SBATCH --mem=23800M
-#SBATCH --array=1-192
-#SBATCH --time=04:00:00
+#SBATCH --mem=26G
+#SBATCH --time=1-00:00:00
+#SBATCH --array=1-192%14
+
+# mem was previously: --mem=23800M
 
 module purge
 module add apps/bwa
 
-source ${WORK_BGFS}/scripts/master/main.env
-source ${WORK_BGFS}/scripts/master/refs.env
-source ${WORK_BGFS}/scripts/master/tools.env
+source main.env
+source refs.env
+source tools.env
 
 ########################## Note #############################
 # This script processes each sample in parallel,
@@ -35,18 +37,18 @@ output_intermediate=${DATA}/${batch}/5_align
 output_result=${RESULTS}/${batch}/align
 
 forward_array=(${input}/*_S${SLURM_ARRAY_TASK_ID}_*R1*)
-microchip_id=$(echo ${forward_array[0]} | awk '{print $NF}' FS=/ | grep -o -E '[TH]{0,1}[0-9]*-{0,1}[0-9]+' | head -n 1) #Get microchip ID (including tumorID if it exists)
+microchip_id=$(echo ${forward_array[0]} | awk '{print $NF}' FS=/ | grep -o -E '[TH]{0,1}[0-9A-Za-z]*-{0,1}[0-9]+' | head -n 1) #Get microchip ID (including tumorID if it exists)
 
 start=`date +%s`
 
 # Loop setup for NextSeq runs, allows this script to be run if a single sample has multiple lanes (e.g., multiple fastq files)
 for i in {0..0}
 do
-    let lane=$i+1
-    outname=${microchip_id}_L00${lane}
     forward=${forward_array[$i]}
     reverse=${forward/R1/R2}
     reverse=${reverse/val_1/val_2}
+    lane=$(echo $forward | grep -P -o 'L\d+')
+    outname=${microchip_id}_${lane}
 
     #Read group headers to be added in BWA
     header=$(zcat $forward | head -n 1)
@@ -82,18 +84,19 @@ done
 
 #Mark duplicates and merge BAMs
 java -jar $PICARD MarkDuplicates \
-    $(printf "INPUT=%s " ${output_intermediate}/${microchip_id}_L00*.sorted.bam) \
+    $(printf "INPUT=%s " ${output_intermediate}/${microchip_id}_L*.sorted.bam) \
     OUTPUT=${output_intermediate}/${microchip_id}.dups.bam \
     METRICS_FILE=${output_result}/duplicates/${microchip_id}.dups.stats.txt \
     VALIDATION_STRINGENCY=SILENT
 
-rm ${output_intermediate}/${microchip_id}_L00*.sorted.bam
+rm ${output_intermediate}/${microchip_id}_L*.sorted.bam
 
 #Generate BAM index (.csi due to large contig size)
-SAMTOOLS index \
+$SAMTOOLS index \
     -@ 3 \
     -c \
     ${output_intermediate}/${microchip_id}.dups.bam
+
 
 #Collect probe/target alignment metrics
 java -jar $PICARD CollectHsMetrics \

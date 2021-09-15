@@ -4,8 +4,8 @@
 #SBATCH --qos=margres20
 #SBATCH --mail-user=dgallinson@usf.edu
 #SBATCH --mail-type=END,FAIL
-#SBATCH --output=scripts/master/logs/Capture1_6-11-21/out/6_combine.out
-#SBATCH --error=scripts/master/logs/Capture1_6-11-21/err/6_combine.err
+#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture3/out/6_combine.out
+#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture3/err/6_combine.err
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
@@ -15,7 +15,7 @@
 module purge
 module add apps/python/3.8.5
 
-source ${WORK_BGFS}/scripts/master/main.env
+source main.env
 
 align=${RESULTS}/${batch}/align
 out_dir=MultiQC

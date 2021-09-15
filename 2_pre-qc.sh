@@ -4,32 +4,32 @@
 #SBATCH --qos=margres20
 #SBATCH --mail-user=dgallinson@usf.edu
 #SBATCH --mail-type=END,FAIL
-#SBATCH --output=scripts/master/logs/Capture1_6-11-21/out/2_pre-qc.out
-#SBATCH --error=scripts/master/logs/Capture1_6-11-21/err/2_pre-qc.err
-#SBATCH --ntasks=72
-#SBATCH --nodes=3
+#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture3/out/2_pre-qc.out
+#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture3/err/2_pre-qc.err
+#SBATCH --ntasks=24
+#SBATCH --nodes=1
 #SBATCH --mem=186G
-#SBATCH --time=04:30:00
+#SBATCH --time=1-00:00:00
 
 module purge
 module add apps/fastqc/0.11.5
 
-source ${WORK_BGFS}/scripts/master/main.env
+source main.env
 
-input=${DATA}/${batch}/reads_1/*.fastq.gz
-output=${RESULTS}/${batch_name}/qc
+input=${DATA}/${batch}/1_reads/*.fastq.gz
+output=${RESULTS}/${batch}/qc
 
-#mv 1_cp.sh log files to proper logs/batch
-mv ${LOGS}/1_cp.out ${LOGS}/${batch}/out
-mv ${LOGS}/1_cp.err ${LOGS}/${batch}/err
+# mv 1_cp.sh log files to proper logs/batch
+mv ${LOGS}/1_setup.out ${LOGS}/${batch}/out
+mv ${LOGS}/1_setup.err ${LOGS}/${batch}/err
 
-#FastQC
+# FastQC
 fastqc \
-    -t 48 \
+    -t 72 \
     $input \
     -o ${output}/pre
 
-#Necessary to prevent conflict between loading FastQC (which loads python2.7) and multiqc
+# Necessary to prevent conflict between loading FastQC (which loads python2.7) and multiqc
 module purge
 module add apps/python/3.8.5
 

@@ -4,18 +4,18 @@
 #SBATCH --qos=margres20
 #SBATCH --mail-user=dgallinson@usf.edu
 #SBATCH --mail-type=END,FAIL
-#SBATCH --output=scripts/master/logs/Capture1_6-11-21/out/4_post-qc.out
-#SBATCH --error=scripts/master/logs/Capture1_6-11-21/err/4_post-qc.err
+#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture4/out/4_post-qc.out
+#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture4/err/4_post-qc.err
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=186G
-#SBATCH --time=45:00
+#SBATCH --time=30:00
 
 module purge
 module add apps/python/3.8.5
 
-source ${WORK_BGFS}/scripts/master/main.env
+source main.env
 
 src=${DATA}/${batch}/3_trim
 dest=${RESULTS}/${batch}/qc/post
