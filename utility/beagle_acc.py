@@ -140,8 +140,6 @@ def main(truth_df, freq_model, tmp_id="", output="", phased=False, nrows=None):
 	return stats
 
 
-start = time.perf_counter()
-
 parser = ag.ArgumentParser(description="Test imputation accuracy of BEAGLE")
 parser.add_argument("truth", help="Path to the ground truth VCF (must have no missing samples)")
 parser.add_argument("alleles", help="Path to the allele count file (generated via: vcftools --counts | cut -f4)")
@@ -189,5 +187,5 @@ print(f"\nAccuracy mean: {mean:.2f}%")
 print(f"Accuracy std: {std:.2f}%")
 
 output = f"{args.output}.beagle_test.tabular"
-print(f"\nWriting accuracy report to {output}", end="")
+print(f"\nWriting accuracy report to {output}")
 pd.DataFrame(stats_dict).to_csv(output, index=False, sep="\t")
