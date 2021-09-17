@@ -352,18 +352,20 @@ class TumorSamples(Samples):
 	# 			  numpy array containing negative numbers representing days since tumor volume = 3 mm^3
 	# Steps:
 	# 			  1) Convert mm to cm if is_cm=True
-	# 			  2) Determine volumes >= mmax, storing only those microchips and volumes not already in the over_mmax dict
+	# 			  2) Determine volumes >= mmax, setting those volumes to NaN and storing only those microchips and volumes not already in the over_mmax dict
 	# 			  3) Perform the back calculation
 	# 			  4) Round the calculations to the nearest int if round_flag=True and return
 	# Gotchas:
 	# 			  Formula domain: (0, mmax)
-	# 			  Formula range: (-inf, 0); as volume -> 201, days -> -inf
-	# TODO:
-	# 			  Volumes >= mmax cause numpy to throw a RuntimeWarning. Catch these and print something nicer
+	# 			  Formula range: (-inf, 0); as volume -> mmax, days -> -inf
 	def __growth_back_calculation(self, tumor_volumes, mmax=202, init_size=0.0003, alpha=0.03, is_cm=False, round_flag=True):
+		tumor_volumes = tumor_volumes.copy()
 		if not is_cm:
 			tumor_volumes /= 1000
 		over = tumor_volumes[(tumor_volumes + 1) >= mmax]
+		if over.size > 0:
+			print(f"*WARNING* found {len(over)} volumes greater than mmax while performing the back calculation (try print_over_mmax() for details)")
+			tumor_volumes[(tumor_volumes + 1) >= mmax] = np.nan
 		if self.over_mmax["Microchip"]:
 			over = over.drop(self.over_mmax["Microchip"])
 		if len(over > 0):
@@ -450,8 +452,7 @@ batch_ids = [f"{base}/Capture1_6-11-21/rename_key.csv", f"{base}/Capture2_7-29-2
 b2_id = [f"{base}/Capture2_7-29-21/rename_key.csv"]
 
 
-
-tumor = TumorSamples(samples, tumors, tissue="Host")
+tumor = TumorSamples(samples, tumors, id_paths=b2_id)
 tumor.estimate_age()
-tumor.susbset_non_nan("infection_age")
-print(tumor)
+# tumor.susbset_non_nan("infection_age")
+print(tumor.count_groups("Site"))
