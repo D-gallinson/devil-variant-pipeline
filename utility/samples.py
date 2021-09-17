@@ -217,10 +217,17 @@ class TumorSamples(Samples):
 	
 	# ANALYSIS PHENOTYPE
 	def estimate_age(self):
-		if "devil_survival_days" not in self.sample_df.columns:
-			print("Please run survival_proxy() before using this method")
-			return None
-
+		tmp_tumor_df = self.tumor_df[["Microchip", "TrapDate", "TumourDepth", "TumourLength", "TumourWidth"]].copy()
+		tmp_tumor_df["TrapDate"] = pd.to_datetime(tmp_tumor_df["TrapDate"])
+		dates_df = self.__init_tumor_date(tmp_tumor_df)
+		YOB = self.sample_df.set_index("Microchip")["YOB"]
+		YOB = YOB[~YOB.index.duplicated(keep="first")]
+		YOB = pd.to_datetime(YOB)
+		merged = pd.concat([dates_df, YOB[dates_df.index]], axis=1)
+		infection_age = (merged["init_tumor_date"] - merged["YOB"]).dt.days
+		infection_age.name = "infection_age"
+		infection_age = infection_age.reset_index()
+		self.sample_df = self.sample_df.merge(infection_age, how="left", on="Microchip")
 
 
 	def fast_stats_tumor(self):
@@ -254,34 +261,24 @@ class TumorSamples(Samples):
 	# 7) Collate all of the info from step 6 and add it to the relevant Microchips in sample_df (missing values get NaN)
 	def survival_proxy(self, day_cutoff=40):
 		tmp_tumor_df = self.tumor_df[["Microchip", "TrapDate", "TumourDepth", "TumourLength", "TumourWidth"]].copy()
-		# STEP 1
 		tmp_tumor_df["TrapDate"] = pd.to_datetime(tmp_tumor_df["TrapDate"])
+		
 		date_diff = tmp_tumor_df.groupby("Microchip")["TrapDate"].transform(lambda x: x.max() - x.min())
 		tmp_tumor_df["date_diff"] = date_diff.dt.days
-		# STEP 2
 		self.under_40 = pd.Series(tmp_tumor_df[tmp_tumor_df["date_diff"] < day_cutoff]["Microchip"].unique())
 		tmp_tumor_df = tmp_tumor_df[tmp_tumor_df["date_diff"] >= day_cutoff]
-		volume_cluster = self.__min_cap_volume(tmp_tumor_df)
-		# STEP 5
-		back_calculation = self.__growth_back_calculation(volume_cluster)
-		# STEP 6
-		chip_ids = volume_cluster.index
-		# STEP 6a
-		chip_groups = tmp_tumor_df.groupby("Microchip")["TrapDate"]
-		first_trap = chip_groups.min().loc[chip_ids]
-		last_trap = chip_groups.max().loc[chip_ids]
-		# STEP 6b
-		tumor_start_date = first_trap - pd.to_timedelta(-1 * back_calculation, unit="d")
-		# STEP 6c
-		devil_survival_days = last_trap - tumor_start_date
-		# STEP 7
+		
+		dates_df = self.__init_tumor_date(tmp_tumor_df)
+		last_trap = tmp_tumor_df.groupby("Microchip")["TrapDate"].max().loc[dates_df.index]
+		devil_survival_days = last_trap - dates_df["init_tumor_date"]
+		
 		calc_df = pd.DataFrame({
-			"Microchip": chip_ids,
-			"volume (cm^3)": np.round(volume_cluster.values, 2),
-			"back_calc": back_calculation,
-			"first_trap": first_trap.dt.date.values,
+			"Microchip": dates_df.index.values,
+			"volume (cm^3)": np.round(dates_df["tumor_volume"].values, 2),
+			"back_calc": dates_df["back_calc"].values,
+			"first_trap": dates_df["min_date"].dt.date.values,
 			"last_trap": last_trap.dt.date.values,
-			"tumor_start_date": tumor_start_date.dt.date.values,
+			"init_tumor_date": dates_df["init_tumor_date"].dt.date.values,
 			"devil_survival_days": devil_survival_days.dt.days.values})
 		self.sample_df = self.sample_df.merge(calc_df, how="left", on="Microchip")
 
@@ -320,6 +317,17 @@ class TumorSamples(Samples):
 		return hosts_not_in
 
 
+	def print_over_mmax(self):
+		if not self.over_mmax["Microchip"]:
+			print("No back calculations have been done yet")
+			return None
+		print("Microchip\tVolume (cm^3)")
+		N = len(self.over_mmax["Microchip"])
+		for i in range(N):
+			print(f"{self.over_mmax['Microchip'][i]}\t{self.over_mmax['volume'][i]:.3f}")
+		print(f"Length: {N}")
+
+
 	# ANALYSIS PHENOTYPE
 	def tumor_count(self):
 		num_tumors = self.tumor_df.groupby(["Microchip"])["TumourNumber"].unique().str.len()
@@ -328,12 +336,30 @@ class TumorSamples(Samples):
 		self.sample_df = self.sample_df.merge(num_tumors, how="left", on="Microchip")
 
 
-	# A logistic growth back calculation derived from Wells et al. (2017; DOI: 10.1111/ele.12776) which was based on data from WPP.
-	# Output is a negative number in days representing days from the min capture date since the tumor was 3 mm^3.
-	# The model is not accurate enough to estimate beyond day resolution, and thus rounding to the nearest day (default round_flag) is advised.
-	# This also stores any volumes greater than mmax
-	# Domain: (0, inf)
-	# Range: (-inf, 0); as volume -> 201, days -> -inf
+	# Definition: 
+	# 			  A logistic growth back calculation derived from Wells et al. (2017; DOI: 10.1111/ele.12776) which was based on data from WPP.
+	# 			  Output is a negative number in days representing days from the min capture date since the tumor was 3 mm^3.
+	# 			  The model is not accurate enough to estimate beyond day resolution, and thus rounding to the nearest day 
+	# 			  (default round_flag) is advised. This also stores any volumes greater than mmax.
+	# Arguments:
+	# 			  tumor_volumes: a vector/Series of tumor volumes
+	# 			  mmax: 		 max tumor size in cm^3 (from growth model)
+	# 			  init_size: 	 initial tumor size (from growth model)
+	# 			  alpha: 		 scale parameter of the logistic growth curve (from growth model)
+	# 			  is_cm: 		 flag if the incoming volume is in centimeters
+	# 			  round_flag: 	 flag if the back calculated volumes should be rounded to the nearest int
+	# Returns:
+	# 			  numpy array containing negative numbers representing days since tumor volume = 3 mm^3
+	# Steps:
+	# 			  1) Convert mm to cm if is_cm=True
+	# 			  2) Determine volumes >= mmax, storing only those microchips and volumes not already in the over_mmax dict
+	# 			  3) Perform the back calculation
+	# 			  4) Round the calculations to the nearest int if round_flag=True and return
+	# Gotchas:
+	# 			  Formula domain: (0, mmax)
+	# 			  Formula range: (-inf, 0); as volume -> 201, days -> -inf
+	# TODO:
+	# 			  Volumes >= mmax cause numpy to throw a RuntimeWarning. Catch these and print something nicer
 	def __growth_back_calculation(self, tumor_volumes, mmax=202, init_size=0.0003, alpha=0.03, is_cm=False, round_flag=True):
 		if not is_cm:
 			tumor_volumes /= 1000
@@ -349,14 +375,29 @@ class TumorSamples(Samples):
 		return back_calculation
 
 
-	# Obtain the tumor volume Series for the minimum capture date with microchips as the index. When a host has multiple tumors, different grouping
-	# functions can be used (e.g., max or sum). If this is being used with the growth back calculation, max should set for mode. Drops rows with an NA measurement.
-	# This inelegant method obtains each microchip group's minimum date and then loops through each microchip number, slices rows on the microchip,
-	# and extracts all rows equal to that microchip's minimum date. Something utilizing Pandas would be nicer.
+	# Definition: 
+	# 			  Obtain the tumor volume Series for the minimum capture date with microchips as the index.
+	# 			  When a host has multiple tumors, different grouping functions can be used (e.g., max or sum). 
+	# 			  If this is being used with the growth back calculation, max should set for mode. Drops rows with an NA measurement.
+	# Arguments:
+	#			  tumor_df: a DF with at least the following cols: Microchip, TrapDate, TumourDepth, TumourLength, TumourWidth
+	# 			  mode: 	method of selecting a single volume when multiple tumors are present at the same date
+	# Returns: 
+	# 			  a DF containing Microchip as the index and cols tumor_volume (in starting units) and min_date (representing the minimum date for a sample)
+	# Steps:
+	#			  1) get min date for a sample (group on Microchip)
+	# 			  2) Iterate through each of these microchips, find all rows with the min date, and generate a DF from these
+	# 			  3) Obrain tumor volumes via length x width x depth
+	# 			  4) Group these volumes on Microchip and select a single volume for each microchip (i.e., max, mean, sum)
+	# Gotchas:
+	# 			  Drops rows if any NA is found in TumourDepth, TumourLength, or TumourWidth
+	# TODO:
+	# 			  The loop is an inelegant and inefficient solution, this should be vectorized
 	def __min_cap_volume(self, tumor_df, mode="max"):
 		tumor_df = tumor_df.dropna(subset=["TumourDepth", "TumourLength", "TumourWidth"])
-		min_dates = tumor_df.groupby("Microchip")["TrapDate"].min()
-		min_dates = {"Microchip": min_dates.index, "TrapDate": min_dates.values}
+		min_date_groups = tumor_df.groupby("Microchip")["TrapDate"].min()
+		min_date_groups.name = "min_date"
+		min_dates = {"Microchip": min_date_groups.index, "TrapDate": min_date_groups.values}
 		first_tumor_list = []
 		
 		for i in range(len(min_dates["Microchip"])):
@@ -374,7 +415,28 @@ class TumorSamples(Samples):
 			volume_cluster = volume_cluster.sum()
 		else:
 			volume_cluster = volume_cluster.max()
-		return volume_cluster
+		return pd.concat([volume_cluster, min_date_groups], axis=1)
+
+
+	# Definition:
+	# 			  This is  a convenience function combining the functionality of __min_cap_volume()
+	# 			  and __growth_back_calculation() to find the initial tumor date.
+	# Arguments:
+	# 			  tumor_df: a DF with at least the following cols: Microchip, TrapDate, TumourDepth, TumourLength, TumourWidth
+	# Returns:
+	# 			  a DF with Microchip as the index and the following cols: tumor_volume, min_date, back_calc, init_tumor_date
+	# Steps:
+	# 			  1) Run __min_cap_volume() and __growth_back_calculation
+	# 			  2) Get the initial tumor date by subtracting the back calc from the min date
+	# 			  3) Combine everything into a DF
+	def __init_tumor_date(self, tumor_df):
+		volumes = self.__min_cap_volume(tumor_df)
+		volumes["tumor_volume"] /= 1000
+		back_calc = self.__growth_back_calculation(volumes["tumor_volume"], is_cm=True)
+		init_tumor_dates = volumes["min_date"] - pd.to_timedelta(-1 * back_calc, unit="d")
+		init_tumor_dates.name = "init_tumor_date"
+		back_calc = pd.Series(back_calc, name="back_calc", index=volumes.index)
+		return pd.concat([volumes, back_calc, init_tumor_dates], axis=1)
 
 
 
@@ -387,18 +449,9 @@ base = "/shares_bgfs/margres_lab/Devils/BEE_Probe_Data"
 batch_ids = [f"{base}/Capture1_6-11-21/rename_key.csv", f"{base}/Capture2_7-29-21/rename_key.csv", f"{base}/Capture3/rename_key.csv", f"{base}/Capture4/rename_key.csv", f"{base}/Capture5/NVS109A_Margres_CaptureSeq5_R1"]
 b2_id = [f"{base}/Capture2_7-29-21/rename_key.csv"]
 
-# b2 = Samples(samples)
-# b2.subset("Tissue", "Host")
-# print(b2.pair_rows(2))
-# b2.subset("Tissue", "Host")
-# trap_year = b2.extract_year("TrappingDate", replace=False).dropna()
-# trap_year = trap_year.astype(int)
-# print(len(trap_year[trap_year > 2018]))
-# b2.to_pheno("../../phenotype_YOB.txt", ["YOB", "Site"], auto_factor=False)
 
-tumor = TumorSamples(samples, tumors, tissue="Tumour")
-# matches = tumor.get_sample_tumors()
 
-# print(matches[matches["Microchip"] == "982000356426081"][["Microchip", "TumourNumber"]])
-# print(matches[matches["TumourNumber"] != "1"][["Microchip", "TumourNumber"]])
-# tumor.to_pheno("../../survival_proxy.txt", ["first_trap", "last_trap", "volume (cm^3)", "back_calc", "tumor_start_date", "devil_survival_days"], auto_factor=False)
+tumor = TumorSamples(samples, tumors, tissue="Host")
+tumor.estimate_age()
+tumor.susbset_non_nan("infection_age")
+print(tumor)
