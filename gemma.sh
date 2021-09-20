@@ -44,7 +44,7 @@ output_dir=$RESULTS/GEMMA/YOB
 out_prefix=YOB
 vcf_input=$DATA/joint-variants/preliminary/filtered/FINAL_SNPs-host.minDP_10.maxDP_100.alleles.missing_50.mac_2.vcf.gz
 phenotype=../../phenotype_YOB.txt
-mode="default" #change to "xval" for a leave one out blocked xval or "default" for a standard run
+mode="xval" #change to "xval" for a leave one out blocked xval or "default" for a standard run
 
 # Intermediate files
 template=$output_dir/tmp_template.vcf
@@ -52,7 +52,7 @@ bimbam_input=$output_dir/tmp_input.vcf
 pheno_na=$output_dir/tmp_pheno_na.txt
 pheno_input=$output_dir/tmp_pheno.txt
 mean_geno=$output_dir/input.mg
-final_input=$output_dir/geno.mg
+geno_input=$output_dir/geno.mg
 
 # ============= ORDER VCF SAMPLES BY PHENOTYPE FILE SAMPLES =============
 # Generate a template VCF header with the sample order being determined by $phenotype.
@@ -104,7 +104,7 @@ do
     cut -f 2 $pheno_na | tail -n +2 > $pheno_input
 
     # Delete this if I use allele_swap.py
-    final_input=$mean_geno
+    geno_input=$mean_geno
 
     # ===== SWAP REF/ALT TO MAJOR/MINOR =====
     # The BIMBAM mean genotype format specifies that minor alleles=1 and
@@ -115,16 +115,42 @@ do
     # FOR AN ACTUAL ANALYSIS).
     # Generate freq file: VCFtools --freq2 | cut -f 5 | tail -n +2\
 
-    # python3 allele_swap.py -f input_ref.frq -o $final_input $mean_geno
-    # python3 allele_swap.py -a -o $final_input $mean_geno
+    # python3 allele_swap.py -f input_ref.frq -o $geno_input $mean_geno
+    # python3 allele_swap.py -a -o $geno_input $mean_geno
+
+    # Generate a relatedness matrix. This is unnecessary for BSLMMM model fitting but
+    # is needed for predictions. As such, it is necessary to generate this in "xval"
+    # mode but not in "default" mode, although it is generated irrespective of the mode
+    $GEMMA \
+        -gk 1 \
+        -g $geno_input \
+        -p $pheno_input \
+        -outdir $gemma_out \
+        -o $out_prefix
 
     # ===== RUN GEMMA =====
     $GEMMA \
         -bslmm 1 \
-        -g $final_input \
+        -g $geno_input \
         -p $pheno_input \
         -outdir $gemma_out \
         -o $out_prefix
+
+    # In "xval" mode, make a phenotype prediction for each blocked xval
+    # (note that the relatedness matrix is either a cXX centered or sXX standardized file)
+    if [[ $mode == "xval" ]]
+    then
+        $GEMMA \
+            -predict 1 \
+            -g $geno_input \
+            -p $pheno_input \
+            -epm $out_prefix.param.txt \
+            -emu $out_prefix.log.txt \
+            -ebv $out_prefix.bv.txt \
+            -k $out_prefix.*XX.txt \
+            -outdir $gemma_out \
+            -o $out_prefix
+    fi
 
 # rm all tmp files
 rm $output_dir/tmp_*
