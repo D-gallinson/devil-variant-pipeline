@@ -4,8 +4,8 @@
 #SBATCH --qos=margres20
 #SBATCH --mail-user=dgallinson@usf.edu
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture4/out/3_trim/%a.out
-#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture4/err/3_trim/%a.err
+#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture5/out/3_trim/%a.out
+#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture5/err/3_trim/%a.err
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1

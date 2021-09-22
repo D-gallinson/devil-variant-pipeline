@@ -23,24 +23,24 @@ source refs.env
 data_path=${DATA}/${batch}
 
 # Generate file containing the original read directory structure
-# read_dirs=($(ls $data_path | grep -v '.[csvtxt]$'))
-# out=${data_path}/reads_structure.txt
-# echo "==========Directories==========" > $out
-# ls ${data_path} | grep -v '.[csvtxt]$' >> $out
-# printf "\n==========Files==========\n" >> $out
-# for dir in ${read_dirs[@]}
-# do
-#     printf "$dir/\n" >> $out
-#     ls ${data_path}/${dir} >> $out
-#     echo >> $out
-# done
+read_dirs=($(ls $data_path | grep -v '.[csvtxt]$'))
+out=${data_path}/reads_structure.txt
+echo "==========Directories==========" > $out
+ls ${data_path} | grep -v '.[csvtxt]$' >> $out
+printf "\n==========Files==========\n" >> $out
+for dir in ${read_dirs[@]}
+do
+    printf "$dir/\n" >> $out
+    ls ${data_path}/${dir} >> $out
+    echo >> $out
+done
 
-# # Move R1 and R2 reads into a single directory
-# mkdir ${data_path}/1_reads
-# mv ${data_path}/*/* ${data_path}/1_reads
+# Move R1 and R2 reads into a single directory
+mkdir ${data_path}/1_reads
+mv ${data_path}/*/* ${data_path}/1_reads
 
 #Remove empty R1/R2 dirs
-# rm $(find ${data_path}/* -type d -empty)
+rm -r $(find ${data_path}/* -type d -empty)
 
 #Rename files
 python3 ${SCRIPTS}/utility/rename.py \

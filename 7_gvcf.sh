@@ -4,13 +4,13 @@
 #SBATCH --qos=margres20
 #SBATCH --mail-user=dgallinson@usf.edu
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture3/out/7_gvcf/%a_gvcf.out
-#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture3/err/7_gvcf/%a_gvcf.err
+#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture5/out/7_gvcf/%a_gvcf.out
+#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture5/err/7_gvcf/%a_gvcf.err
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=3
 #SBATCH --mem=23808M
-#SBATCH --time=7-00:00:00
+#SBATCH --time=3-00:00:00
 #SBATCH --array=0-191
 
 source main.env

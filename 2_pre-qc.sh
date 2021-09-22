@@ -4,8 +4,8 @@
 #SBATCH --qos=margres20
 #SBATCH --mail-user=dgallinson@usf.edu
 #SBATCH --mail-type=END,FAIL
-#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture3/out/2_pre-qc.out
-#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture3/err/2_pre-qc.err
+#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture5/out/2_pre-qc.out
+#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture5/err/2_pre-qc.err
 #SBATCH --ntasks=24
 #SBATCH --nodes=1
 #SBATCH --mem=186G

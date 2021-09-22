@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=6_combine
-#SBATCH --partition=margres_2020
-#SBATCH --qos=margres20
+#SBATCH --partition=muma_2021
+#SBATCH --qos=preempt_short
 #SBATCH --mail-user=dgallinson@usf.edu
 #SBATCH --mail-type=END,FAIL
-#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture3/out/6_combine.out
-#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture3/err/6_combine.err
+#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture5/out/6_combine.out
+#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture5/err/6_combine.err
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
