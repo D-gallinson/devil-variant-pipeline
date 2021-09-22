@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=GEMMA_YOB_blocked
+#SBATCH --job-name=GEMMA_infection_age
 #SBATCH --partition=muma_2021
 #SBATCH --qos=preempt_short
 #SBATCH --mail-user=dgallinson@usf.edu
 #SBATCH --mail-type=END,FAIL
-#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture2_7-29-21/out/GEMMA_YOB.out
-#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture2_7-29-21/err/GEMMA_YOB.err
+#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture2_7-29-21/out/GEMMA_infection_age.out
+#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture2_7-29-21/err/GEMMA_infection_age.err
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
@@ -39,12 +39,29 @@ set -euo pipefail
 #       Optionally, site can be supplied if using the script in mode=xval
 ##########################################################################
 
-# PARAMETERS: change these as necessary for a run
-output_dir=$RESULTS/GEMMA/YOB
-out_prefix=YOB
+# GEMMA settings
+MIN_MAF=0.01            # GEMMA drops sites with MAF < MIN_MAF [default = 0.01]
+MAX_MISS=0.05           # GEMMA drops sites with missingness > MAX_MISS and imputes sites with missingness between MAX and 1 using the mean genotype [default = 0.05]
+MODEL=1                 # MCMC BSLMM model [default = 1]
+BURNIN=100000           # Burnin iterations (typically 10% of the chain) [default = 100,000]
+CHAIN_LENGTH=1000000    # Chain length (i.e., number of iterations) [default = 1,000,000]
+REL_MAT=1               # Relatedness matrix type (1 = centered, 2 = standardized) [default = 1]
+
+# ============= PARAMETERS =============
+# These should be changed to meet the needs of a specific run.
+# DEFINITIONS
+#    output_dir: Directory to output GEMMA files to. If run in xval mode, site subdirs will be automatically made
+#    out_prefix: The prefix used for all output files. Only necessary for default mode runs
+#    vcf_input:  The input VCF file. GEMMA does some basic filtering/imputation but this should be done beforehand
+#    phenotype:  The phenotype input file, which should contain, in this order, cols: Microchip, my_pheno, Site (can accept NA values)
+#    mode:       Either "xval" or "default". Mode xval autoruns a leave one out blocked xval (with predictions made) whereas default just fits the model to the data
+#    sites:      Sites to use when running in xval mode (sites with no samples should not be included)
+output_dir=$RESULTS/GEMMA/survival
+out_prefix=survival
 vcf_input=$DATA/joint-variants/preliminary/filtered/FINAL_SNPs-host.minDP_10.maxDP_100.alleles.missing_50.mac_2.vcf.gz
-phenotype=../../phenotype_YOB.txt
-mode="xval" #change to "xval" for a leave one out blocked xval or "default" for a standard run
+phenotype=$RESULTS/GEMMA/survival/phenotype_survival.txt
+mode="default"
+sites=("Arthur River" "Black River" "Freycinet" "Takone" "WPP")
 
 # Intermediate files
 template=$output_dir/tmp_template.vcf
@@ -77,18 +94,17 @@ $HOME/tools/qctool/./qctool \
 # Default mode will iterate once, with this hacky workaround ensuring a single iteration
 # whereby the "NA" will either match nothing or be replaced with itself, thus using the unmodified
 # phenotype file as input to GEMMA
-if [[ $mode == "xval" ]]
+if [[ $mode == "default" ]]
 then
-    exclude_sites=("Arthur River" "Black River" "Freycinet" "Takone" "WPP")
-else
-    exclude_sites=("NA")
+    sites=("NA")
 fi
 
 # Processing loop (5 times for xval, once for default)
-for ((i=0; i < ${#exclude_sites[@]}; i++))
+for ((i=0; i < ${#sites[@]}; i++))
 do
-    site="${exclude_sites[$i]}"
+    site="${sites[$i]}"
     gemma_out=$output_dir
+    full_out=$output_dir/$out_prefix
 
     # If xval, make dirs for specific sites to store gemma outputs
     if [[ $mode == "xval" ]]
@@ -97,6 +113,7 @@ do
         mkdir -p $output_dir/$site_dir
         gemma_out=$output_dir/$site_dir
         out_prefix=$site_dir
+        full_out=$gemma_out/$out_prefix
     fi
 
     # awk with delim=\t and replace col 2 with NA where col 3 matches the current site
@@ -136,6 +153,9 @@ do
         -outdir $gemma_out \
         -o $out_prefix
 
+    # The prefix.hyp.txt file produced by GEMMA has a trailing tab which messes with my R stats script
+    sed -i 's/\t$//g' $full_out.hyp.txt
+
     # In "xval" mode, make a phenotype prediction for each blocked xval
     # (note that the relatedness matrix is either a cXX centered or sXX standardized file)
     if [[ $mode == "xval" ]]
@@ -144,10 +164,10 @@ do
             -predict 1 \
             -g $geno_input \
             -p $pheno_input \
-            -epm $out_prefix.param.txt \
-            -emu $out_prefix.log.txt \
-            -ebv $out_prefix.bv.txt \
-            -k $out_prefix.*XX.txt \
+            -epm $full_out.param.txt \
+            -emu $full_out.log.txt \
+            -ebv $full_out.bv.txt \
+            -k $full_out.*XX.txt \
             -outdir $gemma_out \
             -o $out_prefix
     fi
