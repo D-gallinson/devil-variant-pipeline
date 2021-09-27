@@ -1,5 +1,6 @@
 library(ggplot2)
 library(rstan)
+library(stringr)
 
 downsample <- function(df, samples=-1){
   N <- nrow(df)
@@ -14,23 +15,46 @@ downsample <- function(df, samples=-1){
   return(df[seq(1, N, iter),])
 }
 
+logit <- function(x){
+  return(log(x / (1 - x)))
+}
+
 to_sim_mat <- function(df, chains=1){
   arr <- array(unlist(df), c(nrow(df), chains, ncol(df)),
                dimnames=list(NULL, NULL, colnames(df)))
   return(arr)
 }
 
+# Read in input/output CLI args
 args <- commandArgs(trailingOnly=TRUE)
 input <- args[1]
 output <- args[2]
 
 # Adjust based on the GEMMA run
 iters <- 10
+transform <- T
+
+# Prepare the output fname
+if(substr(output, nchar(output), nchar(output)) == "/"){
+  output <- substr(output, 1, nchar(output)-1)
+}
+out_dir <- str_extract(output, regex("([^/]+$)"))
+output <- paste(output, out_dir, sep="/")
 
 # Read in prefix.hyp.txt and downsample iterations
 gemma_hyp_full <- read.csv(input, sep="\t")
 model_params <- colnames(gemma_hyp_full)
 gemma_hyp_full$iter <- seq(1, nrow(gemma_hyp_full)*iters, iters)
+stats_df <- gemma_hyp_full[, c("pve", "pge", "n_gamma")]
+
+logit_cols <- c("h", "pve", "rho", "pge")
+log_cols <- c("pi", "n_gamma")
+if(transform){
+  gemma_hyp_full[, logit_cols] <- logit(gemma_hyp_full[, logit_cols])
+  gemma_hyp_full[, log_cols] <- log(gemma_hyp_full[, log_cols])
+  output <- paste(output, "transform", sep=".")
+}
+
 gemma_hyp <- downsample(gemma_hyp_full)
 
 # Generate DF to hold summary stats
@@ -45,15 +69,22 @@ sim_mat <- to_sim_mat(gemma_hyp_full[,1:length(gemma_hyp_full)-1])
 fit_stats <- monitor(sim_mat, warmup=0)
 
 # Generate plots and stats per parameter
-pdf(paste(output, "convergence_plots.pdf", sep=""))
+pdf(paste(output, "convergence_plots.pdf", sep="."))
 for(param in model_params){
+  y_label <- param
+  if(param %in% logit_cols && transform){
+    y_label <- paste("logit(", param, ")", sep="")
+  }else if(param %in% log_cols && transform){
+    y_label <- paste("log(", param, ")", sep="")
+  }
+
   plot <- ggplot(gemma_hyp, aes_string(x="iter", y=param)) + 
                    geom_point() +
-                   ggtitle(paste("GEMMA Hyperparameter:", param)) + xlab("Iter") + ylab(param)
+                   ggtitle(paste("GEMMA Hyperparameter:", param)) + labs(x="Iter", y=y_label)
   print(plot)
   
   if(param %in% c("pve", "pge", "n_gamma")){
-    col <- gemma_hyp_full[, param]
+    col <- stats_df[, param]
     stat_df["Mean", param] <- mean(col)
     CI <- quantile(col, c(0.025, 0.975))
     stat_df["2.5%", param] <- CI["2.5%"]
@@ -62,5 +93,5 @@ for(param in model_params){
   }
 }
 dev.off()
-write.csv(stat_df, paste(output, "stats.csv", sep=""))
-write.csv(fit_stats, paste(output, "fit_stats.csv", sep=""))
+write.csv(stat_df, paste(output, "stats.csv", sep="."))
+write.csv(fit_stats, paste(output, "convergence_stats.csv", sep="."))
