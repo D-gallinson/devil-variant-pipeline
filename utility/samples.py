@@ -115,6 +115,12 @@ class Samples:
 		self.sample_df = self.sample_df[self.sample_df[col] == pattern]
 
 
+	def subset_pairs(self):
+		indices = self.sample_df.groupby("Microchip")["Microchip"].count()
+		indices = indices[indices > 1].index
+		self.sample_df = self.sample_df[self.sample_df["Microchip"].isin(indices)]
+
+
 	def susbset_non_nan(self, col):
 		self.sample_df = self.sample_df[~self.sample_df[col].isna()]
 
@@ -144,7 +150,7 @@ class Samples:
 				self.extract_year(year_col)
 		microchips = self.sample_df["Microchip"]
 		if vcf_chip:
-			microchips = self.to_vcf_chip()
+			microchips = self.to_vcf_chip(self.sample_df)
 			microchips.name = "Microchip"
 		output_df_list = [microchips]
 		if not isinstance(cols, list):
@@ -168,17 +174,51 @@ class Samples:
 		pheno_df.to_csv(outpath, index=False, sep="\t")
 
 
-	def to_vcf_chip(self):
-		chips = self.sample_df["Microchip"]
+	def to_vcf_chip(self, df):
+		chips = df["Microchip"]
 		chips = chips.str[-6:]
-		tissue = self.sample_df["Tissue"].str[0]
-		tissue[tissue == "T"] += self.sample_df["TumourNumber"]
+		tissue = df["Tissue"].str[0]
+		tissue[tissue == "T"] += df["TumourNumber"]
 		chips = tissue + "-" + chips	
 		return chips
 
 
 	def unique(self, col):
 		return self.sample_df[col].unique()
+
+
+	def write_pairs(self, outpath):
+		pair_df = self.sample_df[["Microchip", "Tissue", "TumourNumber"]].copy()
+		pair_df = self.__handle_triplets(pair_df)
+		pairs = pair_df.groupby("Microchip")["Microchip"].count()
+		pair_loc = pairs[pairs > 1].index
+		pair_df = pair_df[pair_df["Microchip"].isin(pair_loc)]
+		tumors = pair_df[pair_df["Tissue"] == "Tumour"].sort_values(by="Microchip").reset_index(drop=True)
+		tumors = self.to_vcf_chip(tumors)
+		hosts = pair_df[pair_df["Tissue"] == "Host"].sort_values(by="Microchip").reset_index(drop=True)
+		hosts = self.to_vcf_chip(hosts)
+		tumor_host = pd.concat([hosts, tumors], axis=1)
+		tumor_host.columns = ["Hosts", "Tumors"]
+		tumor_host.to_csv(outpath, index=False, sep="\t")
+
+
+
+	def __handle_triplets(self, df):
+		triplets = self.get_pairs(3)
+		print(f"Found {len(triplets)} triplets, please select only 1 of the duplicates to retain:")
+		remove_loc = []
+		for index in triplets.index:
+			current_triplet = self.sample_df[self.sample_df["Microchip"] == index]
+			if len(current_triplet[current_triplet["Tissue"] == "Tumour"]) > 1:
+				dup = current_triplet[current_triplet["Tissue"] == "Tumour"]
+			else:
+				dup = dup = current_triplet[current_triplet["Tissue"] == "Host"]
+			dup_i = list(dup.index.values)
+			print(f'{dup[["Microchip", "Library number", "AnimalName", "Tissue", "YOB", "TrappingDate", "Site", "TumourID", "TumourNumber"]]}')
+			retain_loc = input(f"Please select the index to be retained ({dup_i[0]} or {dup_i[1]}): ")
+			dup_i.remove(int(retain_loc))
+			remove_loc += dup_i
+		return df.loc[~df.index.isin(remove_loc)]
 
 
 	def __isnum(self, x):
@@ -448,11 +488,10 @@ samples = "/work_bgfs/d/dgallinson/data/pheno_data/master_corrections.csv"
 tumors = "/work_bgfs/d/dgallinson/data/pheno_data/originals/RTumourTableRodrigo.csv"
 base = "/shares_bgfs/margres_lab/Devils/BEE_Probe_Data"
 
-batch_ids = [f"{base}/Capture1_6-11-21/rename_key.csv", f"{base}/Capture2_7-29-21/rename_key.csv", f"{base}/Capture3/rename_key.csv", f"{base}/Capture4/rename_key.csv", f"{base}/Capture5/NVS109A_Margres_CaptureSeq5_R1"]
-b2_id = [f"{base}/Capture2_7-29-21/rename_key.csv"]
+batch_ids = [f"{base}/Capture1_6-11-21/rename_key.csv", f"{base}/Capture2_7-29-21/rename_key.csv", f"{base}/Capture3/rename_key.csv", f"{base}/Capture4/rename_key.csv", f"{base}/Capture5/rename_key.csv"]
+prelim = batch_ids[:2]
 
-
-tumor = TumorSamples(samples, tumors, id_paths=b2_id)
-tumor.estimate_age()
-# tumor.susbset_non_nan("infection_age")
-print(tumor.count_groups("Site"))
+atomm_pheno = TumorSamples(samples, tumors, prelim, tissue="both")
+atomm_pheno.write_pairs("../../test_pair.csv")
+# atomm_pheno.subset_pairs()
+# atomm_pheno.fast_stats()
