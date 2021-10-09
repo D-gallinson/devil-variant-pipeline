@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=10_variant-stats
-#SBATCH --partition=margres_2020
-#SBATCH --qos=margres20
+#SBATCH --partition=muma_2021
+#SBATCH --qos=preempt_short
 #SBATCH --mail-user=dgallinson@usf.edu
 #SBATCH --mail-type=END,FAIL
-#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture1_6-11-21/out/10_variant-FINAL1.out
-#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture1_6-11-21/err/10_variant-FINAL1.err
+#SBATCH --output=/work_bgfs/d/dgallinson/outputs/results/vcf_stats/host/missing/run_log.out
+#SBATCH --error=/work_bgfs/d/dgallinson/outputs/results/vcf_stats/host/missing/run_log.err
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
@@ -22,12 +22,13 @@ source main.env
 source refs.env
 source tools.env
 
-sample_type="tumor" #Change to "tumor" or "host"
-input_file="FINAL_SNPs-tumor.filt_isec.minDP_5.maxDP_100.allele_min.missing_50.mac_2.vcf.gz" #Change to relevant input file (assumed to be in /shares_bgfs/.../preliminary/filtered)
-output_folder="FINAL2"  #Change to relevant output folder (assumed to be in $WORK_BGFS/outputs/results/vcf_stats)
+sample_type="host" #Change to "tumor" or "host"
+input_dir="${RESULTS}/filter"    #Change to relevant input folder
+input_file="FINAL_SNPs-host.minDP_10.maxDP_100.alleles.missing_100.mac_2.vcf.gz" #Change to relevant input file
+output_folder="missing"  #Change to relevant output folder (assumed to be in $WORK_BGFS/outputs/results/vcf_stats)
 
 id=${sample_type}_${output_folder}
-input="${DATA}/joint-variants/preliminary/filtered/${input_file}"
+input="${input_dir}/${input_file}"
 output="${RESULTS}/vcf_stats/${sample_type}/${output_folder}"
 
 mkdir -p $output/data
