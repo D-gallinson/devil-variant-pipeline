@@ -57,6 +57,18 @@ class Samples:
 		self.sample_df[col] = years
 
 
+	def factor_file(self, path, cols=[], silent=False):
+		factor_df = pd.DataFrame(self.factor_key)
+		if not cols:
+			subset = factor_df
+		else:
+			subset = factor_df[factor_df["pheno"].isin(cols)]
+		if subset.empty and not silent:
+			print("No factors to print")
+			return None
+		subset.to_csv(path, index=False, sep="\t")
+
+
 	def fast_stats(self):
 		print(f"Samples: {self.sample_df.shape[0]}")
 		print(f"Hosts: {self.sample_df[self.sample_df['Tissue'] == 'Host'].shape[0]}")
@@ -120,8 +132,6 @@ class Samples:
 			current = factor_df[factor_df["pheno"] == pheno]
 			print(pheno)
 			print(current[["key", "val"]].to_string(index=False))
-		# for i in range(len(self.factor_key["key"])):
-		# 	print(f"{self.factor_key['key'][i]}\t{self.factor_key['val'][i]}")
 
 
 	def subset(self, col, pattern):
@@ -165,11 +175,11 @@ class Samples:
 			self.to_vcf_chip(self.sample_df)
 		pheno_df = self.sample_df[id_cols + cols]
 		pheno_df = pheno_df.fillna("NA")
-		if gen_factor_flag:
-			outdir = outpath[:outpath.rfind(".")]
-			factor_out = f"{outdir}_FACTOR_KEY.txt"
-			factor_key_df = pd.DataFrame(self.factor_key)
-			factor_key_df.to_csv(factor_out, index=False, sep="\t")
+		outdir = outpath[:outpath.rfind(".")]
+		factor_out = f"{outdir}_FACTOR_KEY.txt"
+		self.factor_file(factor_out, cols=cols, silent=True)
+		# factor_key_df = pd.DataFrame(self.factor_key)
+		# factor_key_df.to_csv(factor_out, index=False, sep="\t")
 		pheno_df.to_csv(outpath, index=False, sep="\t")
 
 
