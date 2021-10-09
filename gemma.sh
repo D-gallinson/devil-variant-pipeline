@@ -4,8 +4,8 @@
 #SBATCH --qos=preempt_short
 #SBATCH --mail-user=dgallinson@usf.edu
 #SBATCH --mail-type=END,FAIL
-#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture2_7-29-21/out/GEMMA_infection_age.out
-#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture2_7-29-21/err/GEMMA_infection_age.err
+#SBATCH --output=/work_bgfs/d/dgallinson/scripts/master/logs/Capture2_7-29-21/out/GEMMA_infection_age_15m.out
+#SBATCH --error=/work_bgfs/d/dgallinson/scripts/master/logs/Capture2_7-29-21/err/GEMMA_infection_age_15m.err
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
@@ -15,6 +15,7 @@
 module purge
 module load apps/vcftools
 module load apps/python/3.8.5
+module load compilers/gcc
 
 source main.env
 source refs.env
@@ -43,8 +44,8 @@ set -euo pipefail
 MIN_MAF=0.01            # GEMMA drops sites with MAF < MIN_MAF [default = 0.01]
 MAX_MISS=0.05           # GEMMA drops sites with missingness > MAX_MISS and imputes sites with missingness between MAX and 1 using the mean genotype [default = 0.05]
 MODEL=1                 # MCMC BSLMM model [default = 1]
-BURNIN=100000           # Burnin iterations (typically 10% of the chain) [default = 100,000]
-CHAIN_LENGTH=1000000    # Chain length (i.e., number of iterations) [default = 1,000,000]
+BURNIN=1500000          # Burnin iterations (typically 10% of the chain) [default = 100,000]
+CHAIN_LENGTH=15000000   # Chain length (i.e., number of iterations) [default = 1,000,000]
 REL_MAT=1               # Relatedness matrix type (1 = centered, 2 = standardized) [default = 1]
 
 # ============= PARAMETERS =============
@@ -56,12 +57,32 @@ REL_MAT=1               # Relatedness matrix type (1 = centered, 2 = standardize
 #    phenotype:  The phenotype input file, which should contain, in this order, cols: Microchip, my_pheno, Site (can accept NA values)
 #    mode:       Either "xval" or "default". Mode xval autoruns a leave one out blocked xval (with predictions made) whereas default just fits the model to the data
 #    sites:      Sites to use when running in xval mode (sites with no samples should not be included)
-output_dir=$RESULTS/GEMMA/survival
-out_prefix=survival
+#    transform:  Transformation to be done on the phenotype data before being used for model fitting (inv_logit, logit, log)
+output_dir=$RESULTS/GEMMA/15m/infection_age
+out_prefix=infection_age
 vcf_input=$DATA/joint-variants/preliminary/filtered/FINAL_SNPs-host.minDP_10.maxDP_100.alleles.missing_50.mac_2.vcf.gz
-phenotype=$RESULTS/GEMMA/survival/phenotype_survival.txt
+phenotype=$RESULTS/GEMMA/infection_age/phenotype_infection_age.txt
 mode="default"
 sites=("Arthur River" "Black River" "Freycinet" "Takone" "WPP")
+transform=""
+
+# Parameters if a classic xval is to be performed (i.e., randomly split data into training/test)
+# NOTE: It is necessary to set mode="xval" above to perform classic xval
+# DEFINITIONS:
+# classic_xval: Set to any non-empty string if performing classic xval
+# test_percent: The percent of phenotype data to be reserved as the test set (typically a 20/80 test/training split)
+# iters:        The number of indpendent models to fit and find test accuracy of
+# parallel:     Set to any non-empty string if running the script in parallel (i.e., SBATCH --array)
+classic_xval=""
+test_percent=20
+iters=5
+parallel=""
+
+# Another workaround to ensure that xval iterates iters times but does not NA by site
+if [[ classic_xval != "" ]]
+then
+    sites=($(for((i=1;i<=$iters;i++)); do printf "NA "; done))
+fi
 
 # Intermediate files
 template=$output_dir/tmp_template.vcf
@@ -120,6 +141,11 @@ do
     awk -v site="$site" 'BEGIN{FS=OFS="\t"} $3~site {$2="NA"}1' $phenotype > $pheno_na
     cut -f 2 $pheno_na | tail -n +2 > $pheno_input
 
+    if [[ $transform != "" ]]
+    then
+        Rscript $SCRIPTS/utility/gemma_prep.R $pheno_input $transform
+    fi
+
     # Delete this if I use allele_swap.py
     geno_input=$mean_geno
 
@@ -150,6 +176,8 @@ do
         -bslmm 1 \
         -g $geno_input \
         -p $pheno_input \
+        -w $BURNIN \
+        -s $CHAIN_LENGTH \
         -outdir $gemma_out \
         -o $out_prefix
 
@@ -171,6 +199,11 @@ do
             -outdir $gemma_out \
             -o $out_prefix
     fi
+
+if [[ $mode == "default" ]]
+then
+    Rscript $SCRIPTS/utility/gemma_stats.R $full_out.hyp.txt $output_dir
+fi
 
 # rm all tmp files
 rm $output_dir/tmp_*
