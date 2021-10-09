@@ -29,6 +29,16 @@ class Samples:
 		return repr(self.sample_df)
 
 
+	def chip_sort(self, df, num_only=False, reset_index=True):
+		if num_only:
+			sort_df = df.sort_values(by="Microchip", key=lambda x: x.str[-6:])
+		else:
+			sort_df = df.sort_values(by="Microchip")
+		if reset_index:
+			sort_df.reset_index(drop=True, inplace=True)
+		return sort_df
+
+
 	def count(self, col, pattern):
 		return len(self.sample_df[self.sample_df[col] == pattern])
 
@@ -63,8 +73,9 @@ class Samples:
 			subset = factor_df
 		else:
 			subset = factor_df[factor_df["pheno"].isin(cols)]
-		if subset.empty and not silent:
-			print("No factors to print")
+		if subset.empty:
+			if not silent:
+				print("No factors to print")
 			return None
 		subset.to_csv(path, index=False, sep="\t")
 
@@ -170,55 +181,35 @@ class Samples:
 			return phenotype
 
 
+	def ATOMM_pheno(self, outpath, cols):
+		self.subset_pairs()
+		self.__handle_triplets()
+		self.to_vcf_chip()
+		tumor = self.chip_sort(self.sample_df[self.sample_df["Tissue"] == "Tumour"], num_only=True)
+		self.subset("Tissue", "Host")
+		host = self.chip_sort(self.sample_df, num_only=True)
+		host.rename(columns={"Microchip": "host_chip"}, inplace=True)
+		host["tumor_chip"] = tumor["Microchip"]
+		self.sample_df = host
+		self.to_pheno(outpath, cols, id_cols=["host_chip", "tumor_chip"], vcf_chip=False)
+
+
 	def to_pheno(self, outpath, cols, id_cols=["Microchip"], vcf_chip=True):
 		if vcf_chip:
-			self.to_vcf_chip(self.sample_df)
+			self.to_vcf_chip()
 		pheno_df = self.sample_df[id_cols + cols]
 		pheno_df = pheno_df.fillna("NA")
 		outdir = outpath[:outpath.rfind(".")]
 		factor_out = f"{outdir}_FACTOR_KEY.txt"
 		self.factor_file(factor_out, cols=cols, silent=True)
-		# factor_key_df = pd.DataFrame(self.factor_key)
-		# factor_key_df.to_csv(factor_out, index=False, sep="\t")
 		pheno_df.to_csv(outpath, index=False, sep="\t")
 
 
-	def to_pheno_DEP(self, outpath, cols, vcf_chip=True, extract_year=True, auto_factor=True):
-		if extract_year:
-			year_cols = ["YOB", "TrappingDate"]
-			for year_col in year_cols:
-				self.extract_year(year_col)
-		microchips = self.sample_df["Microchip"]
-		if vcf_chip:
-			microchips = self.to_vcf_chip(self.sample_df)
-			microchips.name = "Microchip"
-		output_df_list = [microchips]
-		if not isinstance(cols, list):
-			cols = [cols]
-		gen_factor_flag = False
-		for col in cols:
-			numeric_flag = self.__isnum(self.sample_df[col].dropna().iloc[0])
-			if not numeric_flag and auto_factor:
-				new_col = self.to_factor(col)
-				gen_factor_flag = True
-			else:
-				new_col = self.sample_df[col]
-			output_df_list.append(new_col)
-		pheno_df = pd.concat(output_df_list, axis=1, keys=[col.name for col in output_df_list])
-		pheno_df = pheno_df.fillna("NA")
-		if gen_factor_flag:
-			outdir = outpath[:outpath.rfind(".")]
-			factor_out = f"{outdir}_FACTOR_KEY.txt"
-			factor_key_df = pd.DataFrame(self.factor_key)
-			factor_key_df.to_csv(factor_out, index=False, sep="\t")
-		pheno_df.to_csv(outpath, index=False, sep="\t")
-
-
-	def to_vcf_chip(self, df, inplace=True):
-		chips = df["Microchip"]
+	def to_vcf_chip(self, inplace=True):
+		chips = self.sample_df["Microchip"]
 		chips = chips.str[-6:]
-		tissue = df["Tissue"].str[0]
-		tissue[tissue == "T"] += df["TumourNumber"]
+		tissue = self.sample_df["Tissue"].str[0]
+		tissue[tissue == "T"] += self.sample_df["TumourNumber"]
 		chips = tissue + "-" + chips	
 		if inplace:
 			self.sample_df["Microchip"] = chips
@@ -245,8 +236,7 @@ class Samples:
 		tumor_host.to_csv(outpath, index=False, sep="\t")
 
 
-
-	def __handle_triplets(self, df):
+	def __handle_triplets(self):
 		triplets = self.get_pairs(3)
 		print(f"Found {len(triplets)} triplets, please select only 1 of the duplicates to retain:")
 		remove_loc = []
@@ -261,7 +251,7 @@ class Samples:
 			retain_loc = input(f"Please select the index to be retained ({dup_i[0]} or {dup_i[1]}): ")
 			dup_i.remove(int(retain_loc))
 			remove_loc += dup_i
-		return df.loc[~df.index.isin(remove_loc)]
+		self.sample_df = self.sample_df.loc[~self.sample_df.index.isin(remove_loc)]
 
 
 	def __isnum(self, x):
