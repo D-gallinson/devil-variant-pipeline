@@ -7,14 +7,22 @@ import numpy as np
 
 
 class Samples:
-	def __init__(self, sample_csv_path, id_paths=[]):
+	base = "/shares_bgfs/margres_lab/Devils/BEE_Probe_Data"
+	batch_ids = [f"{base}/Capture1_6-11-21/rename_key.csv", f"{base}/Capture2_7-29-21/rename_key.csv", f"{base}/Capture3/rename_key.csv", f"{base}/Capture4/rename_key.csv", f"{base}/Capture5/rename_key.csv"]
+	prelim = batch_ids[:2]
+
+
+	def __init__(self,
+		sample_csv_path="/work_bgfs/d/dgallinson/data/pheno_data/master_corrections.csv",
+		id_paths=[]
+		):
 		full_df = pd.read_csv(sample_csv_path)
 		if id_paths:
 			ids = self.__L_ID(id_paths)
 			self.sample_df = full_df[full_df["Library number"].isin(ids)].reset_index(drop=True)
 		else:
 			self.sample_df = full_df
-		self.factor_key = {"key": [], "val": []}
+		self.factor_key = {"pheno": [], "key": [], "val": []}
 
 
 	def __str__(self):
@@ -107,8 +115,13 @@ class Samples:
 		if not self.factor_key["key"]:
 			print("No factors have been created")
 			return None
-		for i in range(len(self.factor_key["key"])):
-			print(f"{self.factor_key['key'][i]}\t{self.factor_key['val'][i]}")
+		factor_df = pd.DataFrame(self.factor_key)
+		for pheno in factor_df["pheno"].unique():
+			current = factor_df[factor_df["pheno"] == pheno]
+			print(pheno)
+			print(current[["key", "val"]].to_string(index=False))
+		# for i in range(len(self.factor_key["key"])):
+		# 	print(f"{self.factor_key['key'][i]}\t{self.factor_key['val'][i]}")
 
 
 	def subset(self, col, pattern):
@@ -132,18 +145,35 @@ class Samples:
 			print(f"{pair}\t{len(pairs[pairs == pair])}")
 
 
-	def to_factor(self, col):
+	def to_factor(self, col, inplace=True):
 		phenotype = self.sample_df[col]
 		unique_vals = np.sort(phenotype.dropna().unique())
 		phenotype = phenotype.fillna("NA")
 		factors = [i for i in range(len(unique_vals))]
 		phenotype = phenotype.replace(unique_vals, factors)
+		self.factor_key["pheno"] += [col for i in range(len(unique_vals))]
 		self.factor_key["key"] += list(unique_vals)
 		self.factor_key["val"] += factors
-		return phenotype
+		if inplace:
+			self.sample_df[col] = phenotype
+		else:
+			return phenotype
 
 
-	def to_pheno(self, outpath, cols, vcf_chip=True, extract_year=True, auto_factor=True):
+	def to_pheno(self, outpath, cols, id_cols=["Microchip"], vcf_chip=True):
+		if vcf_chip:
+			self.to_vcf_chip(self.sample_df)
+		pheno_df = self.sample_df[id_cols + cols]
+		pheno_df = pheno_df.fillna("NA")
+		if gen_factor_flag:
+			outdir = outpath[:outpath.rfind(".")]
+			factor_out = f"{outdir}_FACTOR_KEY.txt"
+			factor_key_df = pd.DataFrame(self.factor_key)
+			factor_key_df.to_csv(factor_out, index=False, sep="\t")
+		pheno_df.to_csv(outpath, index=False, sep="\t")
+
+
+	def to_pheno_DEP(self, outpath, cols, vcf_chip=True, extract_year=True, auto_factor=True):
 		if extract_year:
 			year_cols = ["YOB", "TrappingDate"]
 			for year_col in year_cols:
@@ -174,13 +204,16 @@ class Samples:
 		pheno_df.to_csv(outpath, index=False, sep="\t")
 
 
-	def to_vcf_chip(self, df):
+	def to_vcf_chip(self, df, inplace=True):
 		chips = df["Microchip"]
 		chips = chips.str[-6:]
 		tissue = df["Tissue"].str[0]
 		tissue[tissue == "T"] += df["TumourNumber"]
 		chips = tissue + "-" + chips	
-		return chips
+		if inplace:
+			self.sample_df["Microchip"] = chips
+		else:
+			return chips
 
 
 	def unique(self, col):
@@ -244,7 +277,12 @@ class Samples:
 
 
 class TumorSamples(Samples):
-	def __init__(self, sample_csv_path, tumor_csv_path, id_paths=[], tissue="Host"):
+	def __init__(self,
+		sample_csv_path="/work_bgfs/d/dgallinson/data/pheno_data/master_corrections.csv",
+		tumor_csv_path="/work_bgfs/d/dgallinson/data/pheno_data/originals/RTumourTableRodrigo.csv",
+		id_paths=[],
+		tissue="Host"
+		):
 		super().__init__(sample_csv_path, id_paths)
 		tumor_df_full = pd.read_csv(tumor_csv_path, dtype={"TumourNumber": str})
 		if tissue != "both":
@@ -479,19 +517,3 @@ class TumorSamples(Samples):
 		init_tumor_dates.name = "init_tumor_date"
 		back_calc = pd.Series(back_calc, name="back_calc", index=volumes.index)
 		return pd.concat([volumes, back_calc, init_tumor_dates], axis=1)
-
-
-
-# pd.set_option('precision', 0)
-
-samples = "/work_bgfs/d/dgallinson/data/pheno_data/master_corrections.csv"
-tumors = "/work_bgfs/d/dgallinson/data/pheno_data/originals/RTumourTableRodrigo.csv"
-base = "/shares_bgfs/margres_lab/Devils/BEE_Probe_Data"
-
-batch_ids = [f"{base}/Capture1_6-11-21/rename_key.csv", f"{base}/Capture2_7-29-21/rename_key.csv", f"{base}/Capture3/rename_key.csv", f"{base}/Capture4/rename_key.csv", f"{base}/Capture5/rename_key.csv"]
-prelim = batch_ids[:2]
-
-atomm_pheno = TumorSamples(samples, tumors, prelim, tissue="both")
-atomm_pheno.write_pairs("../../test_pair.csv")
-# atomm_pheno.subset_pairs()
-# atomm_pheno.fast_stats()
