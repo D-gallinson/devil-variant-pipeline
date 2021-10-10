@@ -68,6 +68,7 @@ class Samples:
 
 
 	def factor_file(self, path, cols=[], silent=False):
+		self.update_factors(cols)
 		factor_df = pd.DataFrame(self.factor_key)
 		if not cols:
 			subset = factor_df
@@ -168,7 +169,7 @@ class Samples:
 
 	def to_factor(self, col, inplace=True):
 		phenotype = self.sample_df[col]
-		unique_vals = np.sort(phenotype.dropna().unique())
+		unique_vals = sorted(phenotype.dropna().unique(), key=str.casefold)
 		phenotype = phenotype.fillna("NA")
 		factors = [i for i in range(len(unique_vals))]
 		phenotype = phenotype.replace(unique_vals, factors)
@@ -217,8 +218,25 @@ class Samples:
 			return chips
 
 
+	def undo_factor(self, pheno):
+		factor_df = pd.DataFrame(self.factor_key)
+		factor_pheno = factor_df[factor_df["pheno"] == pheno]
+		sample_pheno = self.sample_df[pheno]
+		undone_factors = sample_pheno.replace(factor_pheno["val"].to_list(), factor_pheno["key"].to_list())
+		self.sample_df[pheno] = undone_factors
+		self.factor_key = factor_df[factor_df["pheno"] != pheno].reset_index(drop=True).to_dict(orient='list')
+
+
 	def unique(self, col):
 		return self.sample_df[col].unique()
+
+
+	def update_factors(self, pheno_list):
+		for pheno in pheno_list:
+			if pheno not in self.factor_key["pheno"]:
+				continue
+			self.undo_factor(pheno)
+			self.to_factor(pheno)
 
 
 	def write_pairs(self, outpath):
