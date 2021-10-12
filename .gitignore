@@ -1,3 +1,4 @@
 logs/
 pending/
 *.env
+*.pyc
