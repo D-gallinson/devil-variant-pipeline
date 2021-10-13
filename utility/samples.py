@@ -256,6 +256,8 @@ class Samples:
 
 	def __handle_triplets(self):
 		triplets = self.get_pairs(3)
+		if triplets.empty:
+			return None
 		print(f"Found {len(triplets)} triplets, please select only 1 of the duplicates to retain:")
 		remove_loc = []
 		for index in triplets.index:
