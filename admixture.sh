@@ -16,13 +16,14 @@
 source main.env
 source tools.env
 
-input=$RESULTS/admixture/input/FINAL_SNPs-host.minDP_10.maxDP_100.alleles.missing_100.mac_2.chr.vcf
+input=$RESULTS/admixture/input
+file=FINAL_SNPs-host.minDP_10.maxDP_100.alleles.missing_100.mac_2.chr.vcf
 output=$RESULTS/admixture
 
 $ADMIXTURE \
     --cv \
-    ${input}.bed \
+    $input/${file}.bed \
     $SLURM_ARRAY_TASK_ID \
     -j4
 
-mv ${input}.${SLURM_ARRAY_TASK_ID}.* $output/$SLURM_ARRAY_TASK_ID
+mv ${file}.${SLURM_ARRAY_TASK_ID}.* $output/$SLURM_ARRAY_TASK_ID
