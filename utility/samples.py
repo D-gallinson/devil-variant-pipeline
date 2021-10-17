@@ -39,6 +39,17 @@ class Samples:
 		return sort_df
 
 
+	def compare_to(self, df_path, cols, sep=",", id_col="Microchip", inplace=True):
+		compare_df = pd.read_csv(df_path, sep=sep)
+		compare_df = compare_df[[id_col] + cols]
+		compare_df.rename(columns={id_col: "Microchip"}, inplace=True)
+		combined = self.sample_df.merge(compare_df, how="left", on="Microchip")
+		if inplace:
+			self.sample_df = combined
+		else:
+			return combined
+
+
 	def count(self, col, pattern):
 		return len(self.sample_df[self.sample_df[col] == pattern])
 
@@ -156,8 +167,11 @@ class Samples:
 		self.sample_df = self.sample_df[self.sample_df["Microchip"].isin(indices)]
 
 
-	def susbset_non_nan(self, col):
-		self.sample_df = self.sample_df[~self.sample_df[col].isna()]
+	def subset_non_nan(self, col):
+		na = self.sample_df[col].isna()
+		if isinstance(col, list):
+			na = na.any(axis=1)
+		self.sample_df = self.sample_df[~na]
 
 
 	def summarize_pairs(self):
@@ -462,7 +476,8 @@ class TumorSamples(Samples):
 			tumor_volumes /= 1000
 		over = tumor_volumes[(tumor_volumes + 1) >= mmax]
 		if over.size > 0:
-			print(f"*WARNING* found {len(over)} volumes greater than mmax while performing the back calculation (try print_over_mmax() for details)")
+			vstring = "volumes" if len(over) > 1 else "volume"
+			print(f"*WARNING* found {len(over)} {vstring} greater than mmax while performing the back calculation (try print_over_mmax() for details)")
 			tumor_volumes[(tumor_volumes + 1) >= mmax] = np.nan
 		if self.over_mmax["Microchip"]:
 			over = over.drop(self.over_mmax["Microchip"])
@@ -537,3 +552,47 @@ class TumorSamples(Samples):
 		init_tumor_dates.name = "init_tumor_date"
 		back_calc = pd.Series(back_calc, name="back_calc", index=volumes.index)
 		return pd.concat([volumes, back_calc, init_tumor_dates], axis=1)
+
+
+
+class Compare:
+	def __init__(self, df, cols):
+		self.df = df
+		self.cols = cols
+		self.matched = pd.DataFrame([])
+		self.unmatched = pd.DataFrame([])
+
+
+	def compare_strict(self):
+		self.matched = self.df[self.df[self.cols[0]] == self.df[self.cols[1]]]
+		self.unmatched = self.df[self.df[self.cols[0]] != self.df[self.cols[1]]]
+
+
+	def diff(self, n=1, biggest=True):
+		first = self.unmatched[self.cols[0]]
+		second = self.unmatched[self.cols[1]]
+		abs_diffs = sorted((first - second).abs(), reverse=biggest)
+		return abs_diffs[0:n]
+
+
+	def diff_stats(self):
+		first = self.unmatched[self.cols[0]]
+		second = self.unmatched[self.cols[1]]
+		abs_diffs = (first - second).abs()
+		mean = abs_diffs.mean()
+		median = abs_diffs.median()
+		return mean, median
+
+
+	def stats(self):
+		if self.matched.empty and self.unmatched.empty:
+			print("Please run a comparison method before printing stats!")
+			return None
+		mean, median = self.diff_stats()
+		print(f"Matched: {self.matched.shape[0]}")
+		print(f"Unmatched: {self.unmatched.shape[0]}")
+		print("----- UNMATCHED -----")
+		print(f"Biggest difference: {self.diff()[0]}")
+		print(f"Smallest difference: {self.diff(biggest=False)[0]}")
+		print(f"Mean difference: {mean:.1f}")
+		print(f"Median difference: {median}")
