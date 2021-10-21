@@ -3,6 +3,7 @@ import re
 import time
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 
@@ -135,11 +136,49 @@ class Samples:
 			return nans
 
 
+	# TEST SOME OF THE NORMED VALUES BY HAND TO ENSURE THIS IS WORKING
+	def normalize(self, cols, method="standard", inplace=True):
+		methods = ["standard", "log"]
+		cols = cols if isinstance(cols, list) else [cols]
+		df_cols = self.sample_df[cols]
+		if method == "standard":
+			means = df_cols.mean()
+			stds = df_cols.std()
+			norms = (df_cols - means) / stds
+		elif method == "log":
+			norms = np.log(df_cols)
+		else:
+			print(f"*normalize() ERROR* Method \"{method}\" does not exist! Use: {', '.join(methods)}")
+			return None
+		if not inplace:
+			return norms
+		for col in cols:
+			self.sample_df[col] = norms[col]
+
+
+
 	def pair_rows(self, pair_count):
 		pairs = self.get_pairs()
 		pairs = pairs[pairs == pair_count]
 		chips = pairs.index.values
 		return self.sample_df[self.sample_df["Microchip"].isin(chips)]
+
+
+	def plot_col(self, col, outpath, plot="hist"):
+		plots = ["hist"]
+		data = self.sample_df[col]
+		if plot == "hist":
+			q25, q75 = np.percentile(data, [0.25, 0.75])
+			bin_width = 2 * ((q75 - q25) / len(data)**(-1/3))
+			bins = round((data.max() - data.min()) / bin_width)
+			plt.hist(data, bins=bins, density=True)
+		else:
+			print(f"*plot_col() ERROR* Plot \"{plot}\" does not exist! Use: {', '.join(plots)}")
+			return None
+		plt.ylabel(col)
+		plt.savefig(outpath)
+		plt.close()
+		print(f"Plot saved to: {outpath}")
 
 
 	def print_col(self, col):
