@@ -90,6 +90,7 @@ class Samples:
 			if not silent:
 				print("No factors to print")
 			return None
+		print(f"Writing factor file to: {path}")
 		subset.to_csv(path, index=False, sep="\t")
 
 
@@ -136,25 +137,51 @@ class Samples:
 			return nans
 
 
-	# TEST SOME OF THE NORMED VALUES BY HAND TO ENSURE THIS IS WORKING
-	def normalize(self, cols, method="standard", inplace=True):
-		methods = ["standard", "log"]
+	# Definition: 
+	# 			  Functions to normalize and transform data with sample_df. These can be strung together to transform and then normalize data, such as
+	# 			  the log normal transform: samples.normalize("my_col", method="log"); samples.normalize("my_col"). If the original data within a col
+	# 			  wish to be maintained, the new_col argument should be used, with subsequent normalizations/transformations targetting that new col.
+	# 			  Normalized cols are named as new cols based on the ordering of "cols" and "new_cols", e.g: cols=["col1", "col2", "col3"] and
+	# 			  new_cols=["col1_log", "col2_norm", "col3_lognorm"]
+	# Arguments:
+	# 			  cols: 	the columns to be normalized <string|list>
+	# 			  method: 	method of normalization/transformation <string>
+	# 			  inplace: 	whether or not to return data or change the column in place <boolean>
+	# 			  new_cols: put the normalized/transformed data into new columns <list>
+	# Returns:
+	# 			  The normalized/transformed column(s) or None if inplace or new_cols is specified
+	# Steps:
+	# 			  Depends on the chosen method
+	# Gotchas:
+	# 			  inplace versus new_cols: if both are specified, new_cols will override inplace=True
+	# TODO:
+	# 			  Test all methods by hand to ensure the norms/transforms are working.
+	# 			  Consider an "undo" method (maintaining raw values with new_cols may be sufficient)
+	def normalize(self, cols, method="standard", inplace=True, new_cols=[]):
+		methods = ["inv_logit", "log", "logit", "standard"]
 		cols = cols if isinstance(cols, list) else [cols]
 		df_cols = self.sample_df[cols]
 		if method == "standard":
 			means = df_cols.mean()
 			stds = df_cols.std()
 			norms = (df_cols - means) / stds
+		elif method == "inv_logit":
+			norms = np.exp(df_cols) / (1 + np.exp(df_cols))
 		elif method == "log":
 			norms = np.log(df_cols)
+		elif method == "logit":
+			norms = np.log(df_cols / (1 - df_cols))
 		else:
 			print(f"*normalize() ERROR* Method \"{method}\" does not exist! Use: {', '.join(methods)}")
 			return None
 		if not inplace:
 			return norms
-		for col in cols:
-			self.sample_df[col] = norms[col]
-
+		elif new_cols:
+			df_cols = new_cols
+		else:
+			df_cols = cols
+		for i in range(len(df_cols)):
+			self.sample_df[df_cols[i]] = norms[cols[i]]
 
 
 	def pair_rows(self, pair_count):
@@ -183,6 +210,10 @@ class Samples:
 
 	def print_col(self, col):
 		print(self.sample_df[col].to_list())
+
+
+	def print_cols(self, cols):
+		print(self.sample_df[cols])
 
 
 	def print_factor_key(self):
@@ -236,6 +267,12 @@ class Samples:
 
 
 	def ATOMM_pheno(self, outpath, cols):
+		tissue = pd.unique(self.sample_df["Tissue"])
+		if len(tissue) < 2:
+			print(f"*WARNING* the sample DF only contains a single tissue ({tissue[0]}), and thus pairs cannot be generated.")
+			print("If this is a TumorSamples object, please specify the argument tissue=\"both\"")
+			print("Exiting")
+			return None
 		self.subset_pairs()
 		self.__handle_triplets()
 		self.to_vcf_chip()
@@ -256,6 +293,7 @@ class Samples:
 		outdir = outpath[:outpath.rfind(".")]
 		factor_out = f"{outdir}_FACTOR_KEY.txt"
 		self.factor_file(factor_out, cols=cols, silent=True)
+		print(f"Writing phenotype file to: {outpath}")
 		pheno_df.to_csv(outpath, index=False, sep="\t")
 
 
@@ -363,7 +401,7 @@ class TumorSamples(Samples):
 		microchips = self.sample_df["Microchip"].unique()
 		self.tumor_df = tumor_df_full[tumor_df_full["Microchip"].isin(microchips)]
 		self.over_mmax = {"Microchip": [], "volume": []}
-		self.under_40 = []
+		self.failed_date_delta = []
 
 	
 	# ANALYSIS PHENOTYPE
@@ -392,31 +430,35 @@ class TumorSamples(Samples):
 		print(f"More than 1 trap: {len(trap_cluster[trap_cluster > 1])}")
 
 
-	# ANALYSIS PHENOTYPE
-	# Survival proxy following Margres et at. (2018; DOI: 10.1111/mec.14853) and using a growth back calculation derived from Wells et al. (2017; DOI: 10.1111/ele.12776)
-	# OVERALL: obtain the difference in days between the first and last trapping trip and throw out those <40 days (including single-trip events). Calculate volume
-	# via width x depth x length and put this into the back-calculation to get days since the tumor was 3 mm^3.
-	# DETAILED
-	# 1) Obtain the difference in days from first to last trapping event
-	# 2) Throw out days < 40 (single trap events get tossed) and any rows with NA in width, depth, or length (also save the Microchips of tossed out samples)
-	# 3) Group on Microchip and get the min date per Microchip group. If the devil had multiple tumors (most did), then there will be multiple min dates
-	# 	3a) Within a Microchip group, get the tumorDB row(s) corresponding to the min date
-	# 		*NOTE: herein lies my most awful loop, surely an elegant solution exists to this
-	# 4) Calculate tumor volume
-	# 	4a) Group on Microchip and get a single number per group (i.e., max or mean)
-	# 5) Growth back calculation (also save volumes >= mmax-1)
-	# 6) Get date of tumor start (at volume of 3 mm^3) and devil survival in days
-	# 	6a) Group on Microchip and get the min and max dates
-	# 	6b) Convert the back calculated value to a positive value in days and subtract that from the start (min) date to obtain tumor start date
-	# 	6c) Subtract tumor start date from last trap (max) date to obtain survival in days
-	# 7) Collate all of the info from step 6 and add it to the relevant Microchips in sample_df (missing values get NaN)
-	def survival_proxy(self, day_cutoff=40):
+	# === ANALYSIS PHENOTYPE ===
+	# Definition: 
+	# 			  Obtain a proxy for devil survival similar to Margres et al. (2018; DOI: 10.1111/mec.14853) using a tumor growth back calculation
+	# 			  derived from Wells et al. (2017; DOI: 10.1111/ele.12776). Only devils with 2 trapping events and day_cutoff days between those
+	# 			  trapping events are included. After the volume of the largest tumor (from tumors recorded on the earliest trap date) is obtained,
+	# 			  the back calculation is used to find the number of days since the tumor was 3 mm^3. This date is then subtracted from the last
+	# 			  date the devil was trapped to get survival in days.
+	# Arguments:
+	# 			  day_cutoff: 	 the minimum number of days a devil must be trapped between two trapping events for inclusion in the analysis <int>
+	# 			  verbose_merge: whether the intermediate calculation values should be added to the samples DF. Mostly for debugging <boolean>
+	# Returns:
+	# 			  None. Adds at least a "devil_survival_days" column to the samples DF
+	# Steps:
+	# 			  1) Obtain the difference in days from first to last trapping event
+	# 			  2) Filter out devils with a single trap event or with fewer days between two events which fail the day_cutoff (these are also saved)
+	# 			  3) Back calculate to find the initial tumor data (see __init_tumor_date() for more details)
+	# 			  4) Obtain the date for the most recent trapping event
+	# 			  5) Subtract the tumor initial date from the max trap date to obtain devil survival days
+	# TODO:
+	# 			  The calculated dates often do not match up with Margres et al. (2018) table S1.
+	# 			  Attempt to change the calculation using the sum of all tumor volumes on the min trap date.
+	# 			  Use the Compare class to test calculation similarities
+	def survival_proxy(self, day_cutoff=40, verbose_merge=False):
 		tmp_tumor_df = self.tumor_df[["Microchip", "TrapDate", "TumourDepth", "TumourLength", "TumourWidth"]].copy()
 		tmp_tumor_df["TrapDate"] = pd.to_datetime(tmp_tumor_df["TrapDate"])
 		
 		date_diff = tmp_tumor_df.groupby("Microchip")["TrapDate"].transform(lambda x: x.max() - x.min())
 		tmp_tumor_df["date_diff"] = date_diff.dt.days
-		self.under_40 = pd.Series(tmp_tumor_df[tmp_tumor_df["date_diff"] < day_cutoff]["Microchip"].unique())
+		self.failed_date_delta = pd.Series(tmp_tumor_df[tmp_tumor_df["date_diff"] < day_cutoff]["Microchip"].unique())
 		tmp_tumor_df = tmp_tumor_df[tmp_tumor_df["date_diff"] >= day_cutoff]
 		
 		dates_df = self.__init_tumor_date(tmp_tumor_df)
@@ -431,15 +473,17 @@ class TumorSamples(Samples):
 			"last_trap": last_trap.dt.date.values,
 			"init_tumor_date": dates_df["init_tumor_date"].dt.date.values,
 			"devil_survival_days": devil_survival_days.dt.days.values})
+		if not verbose_merge:
+			calc_df = calc_df[["Microchip", "devil_survival_days"]]
 		self.sample_df = self.sample_df.merge(calc_df, how="left", on="Microchip")
 
 
 	def get_multi_sub_40(self):
-		if len(self.under_40) == 0:
+		if len(self.failed_date_delta) == 0:
 			print("Please run survival_proxy() before using this method")
 			return None
 		single_trap = self.get_trap(1)
-		return self.under_40[~self.under_40.isin(single_trap)]
+		return self.failed_date_delta[~self.failed_date_delta.isin(single_trap)]
 
 
 	def get_trap(self, trap_N):
@@ -493,12 +537,12 @@ class TumorSamples(Samples):
 	# 			  The model is not accurate enough to estimate beyond day resolution, and thus rounding to the nearest day 
 	# 			  (default round_flag) is advised. This also stores any volumes greater than mmax.
 	# Arguments:
-	# 			  tumor_volumes: a vector/Series of tumor volumes
-	# 			  mmax: 		 max tumor size in cm^3 (from growth model)
-	# 			  init_size: 	 initial tumor size (from growth model)
-	# 			  alpha: 		 scale parameter of the logistic growth curve (from growth model)
-	# 			  is_cm: 		 flag if the incoming volume is in centimeters
-	# 			  round_flag: 	 flag if the back calculated volumes should be rounded to the nearest int
+	# 			  tumor_volumes: a vector/Series of tumor volumes <pd.Series>
+	# 			  mmax: 		 max tumor size in cm^3 (from growth model) <int>
+	# 			  init_size: 	 initial tumor size (from growth model) <int>
+	# 			  alpha: 		 scale parameter of the logistic growth curve (from growth model) <int>
+	# 			  is_cm: 		 flag if the incoming volume is in centimeters <boolean>
+	# 			  round_flag: 	 flag if the back calculated volumes should be rounded to the nearest int <boolean>
 	# Returns:
 	# 			  numpy array containing negative numbers representing days since tumor volume = 3 mm^3
 	# Steps:
@@ -534,8 +578,8 @@ class TumorSamples(Samples):
 	# 			  When a host has multiple tumors, different grouping functions can be used (e.g., max or sum). 
 	# 			  If this is being used with the growth back calculation, max should set for mode. Drops rows with an NA measurement.
 	# Arguments:
-	#			  tumor_df: a DF with at least the following cols: Microchip, TrapDate, TumourDepth, TumourLength, TumourWidth
-	# 			  mode: 	method of selecting a single volume when multiple tumors are present at the same date
+	#			  tumor_df: a DF with at least the following cols: Microchip, TrapDate, TumourDepth, TumourLength, TumourWidth <pd.DataFrame>
+	# 			  mode: 	method of selecting a single volume when multiple tumors are present at the same date <string>
 	# Returns: 
 	# 			  a DF containing Microchip as the index and cols tumor_volume (in starting units) and min_date (representing the minimum date for a sample)
 	# Steps:
@@ -576,7 +620,7 @@ class TumorSamples(Samples):
 	# 			  This is  a convenience function combining the functionality of __min_cap_volume()
 	# 			  and __growth_back_calculation() to find the initial tumor date.
 	# Arguments:
-	# 			  tumor_df: a DF with at least the following cols: Microchip, TrapDate, TumourDepth, TumourLength, TumourWidth
+	# 			  tumor_df: a DF with at least the following cols: Microchip, TrapDate, TumourDepth, TumourLength, TumourWidth <pd.DataFrame>
 	# Returns:
 	# 			  a DF with Microchip as the index and the following cols: tumor_volume, min_date, back_calc, init_tumor_date
 	# Steps:
