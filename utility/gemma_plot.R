@@ -12,7 +12,10 @@ violin <- function(df, color, ylab, ylim=c(0, NA)){
     stat_summary(fun=CI, geom="line", size=0.25, color="black") +
     ylim(ylim) +
     ylab(ylab) +
-    theme(axis.title.x=element_blank())
+    theme(axis.title.x=element_blank(),
+          text = element_text(size = 20),
+          axis.title.y = element_text(face = "bold"),
+          axis.text.x = element_text(face = "bold"))
 }
 
 args <- commandArgs(trailingOnly=TRUE)
