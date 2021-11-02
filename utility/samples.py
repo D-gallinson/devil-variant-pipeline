@@ -14,7 +14,7 @@ class Samples:
 
 
 	def __init__(self,
-		sample_csv_path="/work_bgfs/d/dgallinson/data/pheno_data/master_corrections.csv",
+		sample_csv_path=f"{base}/data/pheno_data/master_corrections.csv",
 		id_paths=[]
 		):
 		full_df = pd.read_csv(sample_csv_path)
@@ -191,13 +191,14 @@ class Samples:
 		return self.sample_df[self.sample_df["Microchip"].isin(chips)]
 
 
-	def plot_col(self, col, outpath, plot="hist"):
+	def plot_col(self, col, outpath, plot="hist", bins=10):
 		plots = ["hist"]
 		data = self.sample_df[col]
 		if plot == "hist":
-			q25, q75 = np.percentile(data, [0.25, 0.75])
-			bin_width = 2 * ((q75 - q25) / len(data)**(-1/3))
-			bins = round((data.max() - data.min()) / bin_width)
+			if bins == "Freedman–Diaconis":
+				q25, q75 = np.percentile(data, [0.25, 0.75])
+				bin_width = 2 * ((q75 - q25) / len(data)**(-1/3))
+				bins = round((data.max() - data.min()) / bin_width)
 			plt.hist(data, bins=bins, density=True)
 		else:
 			print(f"*plot_col() ERROR* Plot \"{plot}\" does not exist! Use: {', '.join(plots)}")
@@ -301,7 +302,7 @@ class Samples:
 		chips = self.sample_df["Microchip"]
 		chips = chips.str[-6:]
 		tissue = self.sample_df["Tissue"].str[0]
-		tissue[tissue == "T"] += self.sample_df["TumourNumber"]
+		tissue[~self.sample_df["TumourNumber"].isna()] += self.sample_df["TumourNumber"]
 		chips = tissue + "-" + chips	
 		if inplace:
 			self.sample_df["Microchip"] = chips
@@ -389,8 +390,8 @@ class Samples:
 
 class TumorSamples(Samples):
 	def __init__(self,
-		sample_csv_path="/work_bgfs/d/dgallinson/data/pheno_data/master_corrections.csv",
-		tumor_csv_path="/work_bgfs/d/dgallinson/data/pheno_data/originals/RTumourTableRodrigo.csv",
+		sample_csv_path=f"{Samples.base}/data/pheno_data/master_corrections.csv",
+		tumor_csv_path=f"{Samples.base}/data/pheno_data/originals/RTumourTableRodrigo.csv",
 		id_paths=[],
 		tissue="Host"
 		):
