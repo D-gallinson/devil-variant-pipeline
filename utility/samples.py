@@ -17,7 +17,8 @@ class Samples:
 		sample_csv_path=f"{base}/data/pheno_data/master_corrections.csv",
 		id_paths=[]
 		):
-		full_df = pd.read_csv(sample_csv_path)
+		dates = ["TrappingDate"]
+		full_df = pd.read_csv(sample_csv_path, parse_dates=dates)
 		if id_paths:
 			ids = self.__L_ID(id_paths)
 			self.sample_df = full_df[full_df["Library number"].isin(ids)].reset_index(drop=True)
@@ -60,9 +61,13 @@ class Samples:
 		return groups.sort_index()
 
 
-	def count_pairs(self, pair_N):
-		pairs = self.get_pairs()
-		return len(pairs[pairs == pair_N])
+	# A sanity check to ensure that entries with "True" in the "Host-tumour pair" column
+	# align with what's obtained using the host_tumor_pairs() method below
+	def expected_pairs(self):
+		first_tissue = self.sample_df["Tissue"].unique()[0]
+		expected_pairs = self.subset("Tissue", first_tissue, inplace=False)
+		expected_pairs = self.sample_df[self.sample_df["Host-tumour pair"] == True]
+		return expected_pairs
 
 
 	def extract_year(self, col, replace=True):
@@ -95,13 +100,17 @@ class Samples:
 
 
 	def fast_stats(self):
+		pairs = len(self.host_tumor_pairs()["Microchip"])
+		singles = self.sample_df.shape[0] - pairs
+		multi = len(self.host_tumor_multi()["Microchip"])
 		print(f"Samples: {self.sample_df.shape[0]}")
 		print(f"Hosts: {self.sample_df[self.sample_df['Tissue'] == 'Host'].shape[0]}")
 		print(f"Tumors: {self.sample_df[self.sample_df['Tissue'] == 'Tumour'].shape[0]}")
 		print(f"Missing microchips: {self.nan_sum('Microchip', print_flag=False)}")
-		print(f"Singles: {self.count_pairs(1)}")
-		print(f"Pairs: {self.count_pairs(2)}")
-		print(f"Triplets: {self.count_pairs(3)}")
+		print(f"Unique microchips: {len(self.sample_df['Microchip'].unique())}")
+		print(f"Singles: {singles}")
+		print(f"Pairs: {pairs}")
+		print(f"Multi tumor/host: {multi}")
 
 
 	# col can be a string or list of strings for clustering on multiple columns
@@ -109,11 +118,30 @@ class Samples:
 		return self.sample_df.groupby(col)
 
 
+	# NEEDS WORK
+	# This considers Pieldivina and Iota to be paired, despite them having no tumor samples
+	# Look into extracting pairs only by tumor/host (perhpas get pairs, do something with Host-tumour pair col)
+	# __handle_pairs might also be better suited here
 	def get_pairs(self, pair_count=None):
+		# if pairs_only:
+		# 	pairs = self.subset("Host-tumour pair", True, inplace=False)
 		pairs = self.sample_df.groupby("Microchip")["Microchip"].count()
 		if pair_count:
 			pairs = pairs[pairs == pair_count]
 		return pairs
+
+
+	def host_tumor_pairs(self):
+		pairs = self.sample_df.groupby("Microchip")["Tissue"].nunique()
+		pairs = self.sample_df[self.sample_df["Microchip"].isin(pairs[pairs > 1].index.values)]
+		return pairs
+
+
+	def host_tumor_multi(self):
+		pairs = self.host_tumor_pairs()
+		multi = pairs.groupby(["Microchip", "Tissue"])["Microchip"].count()
+		multi_chips = multi[multi > 1].index.get_level_values("Microchip")
+		return self.sample_df[self.sample_df["Microchip"].isin(multi_chips)].sort_values(by=["Microchip", "Tissue"])
 
 
 	def nan_rows(self, col, tissue="both"):
@@ -132,6 +160,7 @@ class Samples:
 		total = len(subset)
 		nans = subset[col].isna().sum()
 		if print_flag and isinstance(nans, np.integer):
+			print(f"{col}: {total-nans}/{total} ({(total-nans)/total*100:.2f}%) non-NaNs")
 			print(f"{col}: {nans}/{total} ({nans/total*100:.2f}%) NaNs")
 		else:
 			return nans
@@ -228,20 +257,26 @@ class Samples:
 			print(current[["key", "val"]].to_string(index=False))
 
 
-	def subset(self, col, pattern):
-		self.sample_df = self.sample_df[self.sample_df[col] == pattern]
+	def subset(self, col, pattern, inplace=True):
+		subset = self.sample_df[self.sample_df[col] == pattern]
+		if not inplace:
+			return subset
+		self.sample_df = subset
 
 
 	def subset_pairs(self):
-		indices = self.sample_df.groupby("Microchip")["Microchip"].count()
+		# indices = self.sample_df.groupby("Microchip")["Microchip"].count()
+		indices = self.get_pairs()
 		indices = indices[indices > 1].index
 		self.sample_df = self.sample_df[self.sample_df["Microchip"].isin(indices)]
 
 
-	def subset_non_nan(self, col):
+	def subset_non_nan(self, col, verbose=True):
 		na = self.sample_df[col].isna()
 		if isinstance(col, list):
 			na = na.any(axis=1)
+		if verbose:
+			print(f"Removing {na.values.sum()} rows out of {self.sample_df.shape[0]}")
 		self.sample_df = self.sample_df[~na]
 
 
@@ -274,6 +309,9 @@ class Samples:
 			print("If this is a TumorSamples object, please specify the argument tissue=\"both\"")
 			print("Exiting")
 			return None
+		if self.sample_df[cols].isna().any(axis=None):
+			print("*WARNING* the sample DF contains NA values in some of the columns.")
+			print("If this is unintentional, run: samples.subset_non_nan(my_cols) before writing to a phenotype file")
 		self.subset_pairs()
 		self.__handle_triplets()
 		self.to_vcf_chip()
@@ -350,7 +388,7 @@ class Samples:
 		triplets = self.get_pairs(3)
 		if triplets.empty:
 			return None
-		print(f"Found {len(triplets)} triplets, please select only 1 of the duplicates to retain:")
+		print(f"Found {len(triplets)} tissue duplicates, please select only 1 of the duplicates to retain:")
 		remove_loc = []
 		for index in triplets.index:
 			current_triplet = self.sample_df[self.sample_df["Microchip"] == index]
@@ -396,7 +434,8 @@ class TumorSamples(Samples):
 		tissue="Host"
 		):
 		super().__init__(sample_csv_path, id_paths)
-		tumor_df_full = pd.read_csv(tumor_csv_path, dtype={"TumourNumber": str})
+		dates = ["TrapDate"]
+		tumor_df_full = pd.read_csv(tumor_csv_path, dtype={"TumourNumber": str}, parse_dates=dates)
 		if tissue != "both":
 			self.sample_df = self.sample_df[self.sample_df["Tissue"] == tissue]
 		microchips = self.sample_df["Microchip"].unique()
@@ -421,12 +460,24 @@ class TumorSamples(Samples):
 
 
 	def fast_stats_tumor(self):
+		tissue = self.sample_df["Tissue"].unique()
+		if(len(tissue) > 1):
+			tissue = "Tumors and devils"
+		else:
+			tissue = f"{tissue[0]}s"
+		no_db = self.sample_df[~self.sample_df["Microchip"].isin(self.tumor_df["Microchip"].unique())].shape[0]
+		in_db = self.sample_df[self.sample_df["Microchip"].isin(self.tumor_df["Microchip"].unique())].shape[0]
 		unique_samples = len(self.sample_df["Microchip"].unique())
-		found_in_tumor = len(self.tumor_df["Microchip"].unique())
+		unique_tumor_finds = len(self.tumor_df["Microchip"].unique())
+		in_tumor_db = self.sample_df[self.sample_df["Microchip"].isin(self.tumor_df["Microchip"].unique())].shape[0]
+		sample_n = self.sample_df.shape[0]
 		chip_date_cluster = self.tumor_df.groupby(["Microchip", "TrapDate"])["TrapDate"].count()
 		trap_cluster = chip_date_cluster.groupby("Microchip").count()
+		traps = self.tumor_df.groupby("Microchip")["TrapDate"].count()
 
-		print(f"Found in tumor DB: {(found_in_tumor/unique_samples)*100:.1f}% ({found_in_tumor}/{unique_samples})")
+		print(f"===== {tissue} =====")
+		print(f"Found in tumor DB: {(in_tumor_db/sample_n)*100:.1f}% ({in_tumor_db}/{sample_n})")
+		print(f"Found in tumor DB (unique mchips): {(unique_tumor_finds/unique_samples)*100:.1f}% ({unique_tumor_finds}/{unique_samples})")
 		print(f"1 trap: {len(trap_cluster[trap_cluster == 1])}")
 		print(f"More than 1 trap: {len(trap_cluster[trap_cluster > 1])}")
 
@@ -492,19 +543,24 @@ class TumorSamples(Samples):
 		return trap_nums[trap_nums == trap_N].index
 
 
-	# This fails to get the exact tumors we sequenced but gets close. Due to mismatching info
-	# between the saple CSV and tumor CSV, further resolution is impossible. Once I obtain the
-	# proper phenotype data I will update this method (likely to grab based on TrapDate)
-	def get_sample_tumors(self):
+	def get_sample_tumors(self, stats=False):
 		sample_subset = self.sample_df[self.sample_df["Microchip"].isin(self.tumor_df["Microchip"])]
-		sample_tumors = sample_subset[["Microchip", "TumourNumber"]]
+		sample_tumors = sample_subset[["Microchip", "TumourNumber", "TrappingDate"]]
 		found_indices = []
 		for i in range(sample_tumors.shape[0]):
 			current_sample = sample_tumors.iloc[i]
-			found_index = self.tumor_df.loc[(self.tumor_df["Microchip"] == current_sample["Microchip"]) & (self.tumor_df["TumourNumber"] == current_sample["TumourNumber"])]
+			found_index = self.tumor_df.loc[(self.tumor_df["Microchip"] == current_sample["Microchip"]) & (self.tumor_df["TumourNumber"] == current_sample["TumourNumber"]) & (pd.to_datetime(self.tumor_df["TrapDate"]) == current_sample["TrappingDate"])]
 			found_index = list(found_index.index.values)
 			found_indices += found_index
-		return self.tumor_df.loc[found_indices]
+		extracted = self.tumor_df.loc[found_indices]
+		if stats:
+			not_extracted = sample_subset[~sample_subset["Microchip"].isin(extracted["Microchip"])]
+			not_extracted = not_extracted["Microchip"].unique()[:3]
+			print(f"To extract: {sample_subset.shape[0]}")
+			print(f"Extracted: {extracted.shape[0]}")
+			print(f"Not extracted: {sample_subset.shape[0] - extracted.shape[0]}")
+			print(f"Failed mchips: {','.join(not_extracted)}")
+		return 
 
 
 	def no_tumor_entry(self):
