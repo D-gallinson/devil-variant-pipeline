@@ -17,7 +17,7 @@ class Samples:
 		sample_csv_path=f"{base}/data/pheno_data/master_corrections.csv",
 		id_paths=[]
 		):
-		dates = ["TrappingDate"]
+		dates = ["TrappingDate", "YOB"]
 		full_df = pd.read_csv(sample_csv_path, parse_dates=dates)
 		if id_paths:
 			ids = self.__L_ID(id_paths)
@@ -61,6 +61,14 @@ class Samples:
 		return groups.sort_index()
 
 
+	def duplicates(self):
+		cluster = self.sample_df.groupby("Microchip")["Microchip"].count()
+		dup_indices = cluster[cluster > 1].index.values
+		dups = self.sample_df[self.sample_df["Microchip"].isin(dup_indices)]
+		print(f"Duplicate microchips: {dups.shape[0]}/{self.sample_df.shape[0]} ({dups.shape[0]/self.sample_df.shape[0]*100:.2f}%)")
+		return dups
+
+
 	# A sanity check to ensure that entries with "True" in the "Host-tumour pair" column
 	# align with what's obtained using the host_tumor_pairs() method below
 	def expected_pairs(self):
@@ -68,6 +76,18 @@ class Samples:
 		expected_pairs = self.subset("Tissue", first_tissue, inplace=False)
 		expected_pairs = self.sample_df[self.sample_df["Host-tumour pair"] == True]
 		return expected_pairs
+
+
+	def extract_samples(self, chip_list):
+		found = []
+		for chip in chip_list:
+			last_six = chip[-6:]
+			samples = self.sample_df[self.sample_df["Microchip"].str[-6:] == last_six]
+			if chip[0] == "H" or chip[0] == "T":
+				tissue = "Host" if chip[0] == "H" else "Tumour"
+				samples = samples[samples["Tissue"] == tissue]
+			found.append(samples)
+		return pd.concat(found)
 
 
 	def extract_year(self, col, replace=True):
@@ -131,10 +151,12 @@ class Samples:
 		return pairs
 
 
-	def host_tumor_pairs(self):
+	def host_tumor_pairs(self, inplace=False):
 		pairs = self.sample_df.groupby("Microchip")["Tissue"].nunique()
 		pairs = self.sample_df[self.sample_df["Microchip"].isin(pairs[pairs > 1].index.values)]
-		return pairs
+		if not inplace:
+			return pairs
+		self.sample_df = pairs
 
 
 	def host_tumor_multi(self):
@@ -312,7 +334,7 @@ class Samples:
 		if self.sample_df[cols].isna().any(axis=None):
 			print("*WARNING* the sample DF contains NA values in some of the columns.")
 			print("If this is unintentional, run: samples.subset_non_nan(my_cols) before writing to a phenotype file")
-		self.subset_pairs()
+		self.host_tumor_pairs(inplace=True)
 		self.__handle_triplets()
 		self.to_vcf_chip()
 		tumor = self.chip_sort(self.sample_df[self.sample_df["Tissue"] == "Tumour"], num_only=True)
@@ -355,6 +377,19 @@ class Samples:
 		undone_factors = sample_pheno.replace(factor_pheno["val"].to_list(), factor_pheno["key"].to_list())
 		self.sample_df[pheno] = undone_factors
 		self.factor_key = factor_df[factor_df["pheno"] != pheno].reset_index(drop=True).to_dict(orient='list')
+
+
+	def undo_vcf_chip(self, df_path, chip_col="Microchip", header="infer", sep="\t"):
+		df = pd.read_csv(df_path, sep=sep, header=header)
+		df_six = df[chip_col].str[-6:]
+		chips = self.sample_df["Microchip"]
+		found = []
+		for line in df_six:
+			found.append(chips[chips.str[-6:] == line].iloc[0])
+		df[chip_col] = found
+		return df
+
+
 
 
 	def unique(self, col):
@@ -431,7 +466,8 @@ class TumorSamples(Samples):
 		sample_csv_path=f"{Samples.base}/data/pheno_data/master_corrections.csv",
 		tumor_csv_path=f"{Samples.base}/data/pheno_data/originals/RTumourTableRodrigo.csv",
 		id_paths=[],
-		tissue="Host"
+		tissue="Host",
+		extract_on="Host"
 		):
 		super().__init__(sample_csv_path, id_paths)
 		dates = ["TrapDate"]
@@ -439,6 +475,8 @@ class TumorSamples(Samples):
 		if tissue != "both":
 			self.sample_df = self.sample_df[self.sample_df["Tissue"] == tissue]
 		microchips = self.sample_df["Microchip"].unique()
+		if extract_on != "both":
+			microchips = self.sample_df[self.sample_df["Tissue"] == extract_on]["Microchip"].unique()
 		self.tumor_df = tumor_df_full[tumor_df_full["Microchip"].isin(microchips)]
 		self.over_mmax = {"Microchip": [], "volume": []}
 		self.failed_date_delta = []
@@ -447,11 +485,11 @@ class TumorSamples(Samples):
 	# ANALYSIS PHENOTYPE
 	def estimate_age(self):
 		tmp_tumor_df = self.tumor_df[["Microchip", "TrapDate", "TumourDepth", "TumourLength", "TumourWidth"]].copy()
-		tmp_tumor_df["TrapDate"] = pd.to_datetime(tmp_tumor_df["TrapDate"])
 		dates_df = self.__init_tumor_date(tmp_tumor_df)
-		YOB = self.sample_df.set_index("Microchip")["YOB"]
+		YOB = self.sample_df[self.sample_df["Tissue"] == "Host"].set_index("Microchip")["YOB"]
+		# YOB = YOB[YOB["Tissue"] == "Host"]
+		# YOB = self.sample_df.set_index("Microchip")["YOB"]
 		YOB = YOB[~YOB.index.duplicated(keep="first")]
-		YOB = pd.to_datetime(YOB)
 		merged = pd.concat([dates_df, YOB[dates_df.index]], axis=1)
 		infection_age = (merged["init_tumor_date"] - merged["YOB"]).dt.days
 		infection_age.name = "infection_age"
@@ -580,12 +618,25 @@ class TumorSamples(Samples):
 		print(f"Length: {N}")
 
 
+	def subset_extracted(self, inplace=True):
+		extracted_mchips = self.tumor_df["Microchip"].unique()
+		subset = self.sample_df[self.sample_df["Microchip"].isin(extracted_mchips)]
+		if not inplace:
+			return subset
+		self.sample_df = subset
+
+
 	# ANALYSIS PHENOTYPE
 	def tumor_count(self):
 		num_tumors = self.tumor_df.groupby(["Microchip"])["TumourNumber"].unique().str.len()
 		num_tumors = num_tumors.to_frame().reset_index()
 		num_tumors = num_tumors.rename(columns={"TumourNumber": "tumor_count"})
 		self.sample_df = self.sample_df.merge(num_tumors, how="left", on="Microchip")
+
+
+	def unextracted(self):
+		extracted_mchips = self.tumor_df["Microchip"].unique()
+		return self.sample_df[~self.sample_df["Microchip"].isin(extracted_mchips)]
 
 
 	# Definition: 
@@ -722,6 +773,22 @@ class Compare:
 		mean = abs_diffs.mean()
 		median = abs_diffs.median()
 		return mean, median
+
+
+	def show_diff(self, print_only=True):
+		first = self.unmatched[self.cols[0]]
+		second = self.unmatched[self.cols[1]]
+		abs_diffs = (first - second).abs()
+		diff_frame = pd.DataFrame({
+			"Microchip": self.unmatched["Microchip"],
+			self.cols[0]: first,
+			self.cols[1]: second,
+			"diff": abs_diffs
+			})
+		if print_only:
+			print(diff_frame)
+		else:
+			return diff_frame
 
 
 	def stats(self):
