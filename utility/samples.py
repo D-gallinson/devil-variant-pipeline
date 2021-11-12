@@ -15,10 +15,14 @@ class Samples:
 
 	def __init__(self,
 		sample_csv_path=f"{base}/data/pheno_data/master_corrections.csv",
-		id_paths=[]
+		id_paths=[],
+		assume_YOB=True
 		):
 		dates = ["TrappingDate", "YOB"]
-		full_df = pd.read_csv(sample_csv_path, parse_dates=dates)
+		full_df = pd.read_csv(sample_csv_path)
+		if assume_YOB:
+			full_df = self.__assume_YOB(full_df)
+		full_df[dates] = full_df[dates].apply(pd.to_datetime)
 		if id_paths:
 			ids = self.__L_ID(id_paths)
 			self.sample_df = full_df[full_df["Library number"].isin(ids)].reset_index(drop=True)
@@ -390,8 +394,6 @@ class Samples:
 		return df
 
 
-
-
 	def unique(self, col):
 		return self.sample_df[col].unique()
 
@@ -417,6 +419,13 @@ class Samples:
 		tumor_host = pd.concat([hosts, tumors], axis=1)
 		tumor_host.columns = ["Hosts", "Tumors"]
 		tumor_host.to_csv(outpath, index=False, sep="\t")
+
+
+	def __assume_YOB(self, df, breeding_year="4/1"):
+		YOB = df["YOB"].dropna()
+		year_indices = YOB[~YOB.str.contains("/")].index
+		df.loc[year_indices, "YOB"] = breeding_year + "/" + df.loc[year_indices, "YOB"]
+		return df
 
 
 	def __handle_triplets(self):
@@ -487,8 +496,6 @@ class TumorSamples(Samples):
 		tmp_tumor_df = self.tumor_df[["Microchip", "TrapDate", "TumourDepth", "TumourLength", "TumourWidth"]].copy()
 		dates_df = self.__init_tumor_date(tmp_tumor_df)
 		YOB = self.sample_df[self.sample_df["Tissue"] == "Host"].set_index("Microchip")["YOB"]
-		# YOB = YOB[YOB["Tissue"] == "Host"]
-		# YOB = self.sample_df.set_index("Microchip")["YOB"]
 		YOB = YOB[~YOB.index.duplicated(keep="first")]
 		merged = pd.concat([dates_df, YOB[dates_df.index]], axis=1)
 		infection_age = (merged["init_tumor_date"] - merged["YOB"]).dt.days
@@ -598,7 +605,7 @@ class TumorSamples(Samples):
 			print(f"Extracted: {extracted.shape[0]}")
 			print(f"Not extracted: {sample_subset.shape[0] - extracted.shape[0]}")
 			print(f"Failed mchips: {','.join(not_extracted)}")
-		return 
+		return extracted
 
 
 	def no_tumor_entry(self):
