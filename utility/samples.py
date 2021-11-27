@@ -816,6 +816,7 @@ class TumorSamples(Samples):
 	# 			  If this is being used with the growth back calculation, max should be set for mode. Drops rows with an NA measurement.
 	# Arguments:
 	#			  tumor_df: a DF with at least the following cols: Microchip, TrapDate, TumourDepth, TumourLength, TumourWidth <pd.DataFrame>
+	# 			  dropna:   drop any trap date with NA in depth, length, or width cols. This is necessary for the back calculation
 	# 			  mode: 	method of selecting a single volume when multiple tumors are present at the same date <string>
 	# Returns: 
 	# 			  a DF containing Microchip as the index and cols tumor_volume (in starting units) and min_date (representing the minimum date for a sample)
@@ -825,11 +826,13 @@ class TumorSamples(Samples):
 	# 			  3) Obrain tumor volumes via length x width x depth
 	# 			  4) Group these volumes on Microchip and select a single volume for each microchip (i.e., max, mean, sum)
 	# Gotchas:
-	# 			  Drops rows if any NA is found in TumourDepth, TumourLength, or TumourWidth
+	# 			  Conditionally drop rows if any NA is found in TumourDepth, TumourLength, or TumourWidth. If this is not done, then volumes with a missing
+	# 			  dimension are NaN. This is fine for the proxy, but will throw an error for the back calculation estimate.
 	# TODO:
 	# 			  The loop is an inelegant and inefficient solution, this should be vectorized
-	def __min_cap_volume(self, tumor_df, mode="max"):
-		tumor_df = tumor_df.dropna(subset=["TumourDepth", "TumourLength", "TumourWidth"])
+	def __min_cap_volume(self, tumor_df, dropna, mode="max"):
+		if dropna:
+			tumor_df = tumor_df.dropna(subset=["TumourDepth", "TumourLength", "TumourWidth"])
 		min_date_groups = tumor_df.groupby("Microchip")["TrapDate"].min()
 		min_date_groups.name = "min_date"
 		min_dates = {"Microchip": min_date_groups.index, "TrapDate": min_date_groups.values}
@@ -854,19 +857,28 @@ class TumorSamples(Samples):
 
 
 	# Definition:
-	# 			  This is  a convenience function combining the functionality of __min_cap_volume()
-	# 			  and __growth_back_calculation() to find the initial tumor date.
+	# 			  This is a convenience function doing one of two things:
+	# 			  1) Combine the functionality of __min_cap_volume() and __growth_back_calculation() to find the initial tumor date (back-calc estimate)
+	# 			  2) Find the minimum trapping date for which a tumor was observed (survival proxy)
 	# Arguments:
 	# 			  tumor_df:   a DF with at least the following cols: Microchip, TrapDate, TumourDepth, TumourLength, TumourWidth <pd.DataFrame>
 	# 			  proxy_flag: True if using a basic for the init date (i.e., first date trapped with a tumor present). Otherwise, employ the back-calc to estimate the init tumor date
 	# Returns:
-	# 			  a DF with Microchip as the index and the following cols: tumor_volume, min_date, back_calc, init_tumor_date
+	# 			  a DF with Microchip as the index and one of two column configurations:
+	# 			  1) tumor_volume, min_date, back_calc, init_tumor_date
+	# 			  2) tumor_volume, init_tumor_date
 	# Steps:
-	# 			  1) Run __min_cap_volume() and __growth_back_calculation
-	# 			  2) Get the initial tumor date by subtracting the back calc from the min date
-	# 			  3) Combine everything into a DF
+	# 			  1: For __min_cap_volume(), dropna should be true when proxy_flag is false
+	# 			  2) Run __min_cap_volume() to obtain the minimum trap date and max tumor volume for that date
+	# 			  BACK CALCULATION
+	# 			  3) Run __growth_back_calculation() to obtain days since init tumor (negative days)
+	# 			  4) Get the initial tumor date by subtracting the back calc from the min date
+	# 			  5) Combine everything into a DF
+	# 			  PROXY
+	# 			  3) Rename "min_date" (minimum trap date obtained from __min_cap_volume) to "init_tumor_date"
 	def __init_tumor_date(self, tumor_df, proxy_flag):
-		volumes = self.__min_cap_volume(tumor_df)
+		dropna_flag = not proxy_flag
+		volumes = self.__min_cap_volume(tumor_df, dropna_flag)
 		volumes["tumor_volume"] /= 1000
 		if not proxy_flag:
 			back_calc = self.__growth_back_calculation(volumes["tumor_volume"], is_cm=True)
