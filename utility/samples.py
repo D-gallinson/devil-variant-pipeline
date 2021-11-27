@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import datetime
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -11,6 +12,13 @@ class Samples:
 	base = "/shares_bgfs/margres_lab/Devils/BEE_Probe_Data"
 	batch_ids = [f"{base}/Capture1_6-11-21/rename_key.csv", f"{base}/Capture2_7-29-21/rename_key.csv", f"{base}/Capture3/rename_key.csv", f"{base}/Capture4/rename_key.csv", f"{base}/Capture5/rename_key.csv"]
 	prelim = batch_ids[:2]
+	dftd_site_arrival = pd.DataFrame({
+		"Site": ["Freycinet", "WPP", "Takone", "Black River", "Arthur River"],
+		"arrival_date": [1999, 2007, 2013, 2015, 2019],
+		"generations": [11, 7, 4, 3, 1],
+		"years": [22, 14, 8, 6, 2]
+	})
+	dftd_site_arrival["arrival_date"] = pd.to_datetime(dftd_site_arrival["arrival_date"], format="%Y")
 
 
 	def __init__(self,
@@ -35,6 +43,16 @@ class Samples:
 		return repr(self.sample_df)
 
 
+	def add_arrival(self, arrival_cols=["arrival_date"]):
+		arrivals = Samples.dftd_site_arrival[["Site"] + arrival_cols]
+		self.sample_df = self.sample_df.merge(arrivals, how="left", on="Site")
+
+
+	def add_col(self, col):
+		name = col.name if col.name else "new_col"
+		self.sample_df[name] = col
+
+
 	def chip_sort(self, df, num_only=False, reset_index=True):
 		if num_only:
 			sort_df = df.sort_values(by="Microchip", key=lambda x: x.str[-6:])
@@ -43,6 +61,14 @@ class Samples:
 		if reset_index:
 			sort_df.reset_index(drop=True, inplace=True)
 		return sort_df
+
+
+	# def col_math(self, cols, method, inplace=True):
+	# 	methods = ["add", "sub", "mult", "divide"]
+	# 	if method not in methods:
+	# 		print(f"*WARNING* method \"{method}\" is not supported. Please select one of the following methods: {', '.join(methods)}")
+	# 	if method == "add":
+	# 		result = 
 
 
 	def compare_to(self, df_path, cols, sep=",", id_col="Microchip", inplace=True):
@@ -74,10 +100,13 @@ class Samples:
 
 
 	# A sanity check to ensure that entries with "True" in the "Host-tumour pair" column
-	# align with what's obtained using the host_tumor_pairs() method below
+	# align with what's obtained using the host_tumor_pairs() method below.
+	# NOTE: unless all 1056 samples are loaded, this will likely differ from the result
+	# 		obtained by host_tumor_pairs(), as it is likely only a single member of the
+	# 		pair was sequenced
 	def expected_pairs(self):
 		first_tissue = self.sample_df["Tissue"].unique()[0]
-		expected_pairs = self.subset("Tissue", first_tissue, inplace=False)
+		# expected_pairs = self.subset("Tissue", first_tissue, inplace=False)
 		expected_pairs = self.sample_df[self.sample_df["Host-tumour pair"] == True]
 		return expected_pairs
 
@@ -94,16 +123,17 @@ class Samples:
 		return pd.concat(found)
 
 
-	def extract_year(self, col, replace=True):
+	# Document fully. This is really only for writing to a file because it converts any date to a str
+	def extract_year(self, col, inplace=True, beginning=True):
 		dates = self.sample_df[col]
 		years = dates[~dates.isna()].astype(str)
-		if (years.str.find(".") != -1).any():
+		if beginning:
 			years = years.str[:4]
 		else:
 			years = years.str[-4:]
 		nans = dates[dates.isna()]
 		years = pd.concat([years, nans]).sort_index()
-		if not replace:
+		if not inplace:
 			return years
 		self.sample_df[col] = years
 
@@ -124,7 +154,7 @@ class Samples:
 
 
 	def fast_stats(self):
-		pairs = len(self.host_tumor_pairs()["Microchip"])
+		pairs = len(self.host_tumor_pairs(inplace=False)["Microchip"])
 		singles = self.sample_df.shape[0] - pairs
 		multi = len(self.host_tumor_multi()["Microchip"])
 		print(f"Samples: {self.sample_df.shape[0]}")
@@ -137,12 +167,16 @@ class Samples:
 		print(f"Multi tumor/host: {multi}")
 
 
+	def get_col(self, col):
+		return self.sample_df[col]
+
+
 	# col can be a string or list of strings for clustering on multiple columns
 	def get_groups(self, col):
 		return self.sample_df.groupby(col)
 
 
-	# NEEDS WORK
+	# LIKELY DEPRECATE
 	# This considers Pieldivina and Iota to be paired, despite them having no tumor samples
 	# Look into extracting pairs only by tumor/host (perhpas get pairs, do something with Host-tumour pair col)
 	# __handle_pairs might also be better suited here
@@ -155,16 +189,17 @@ class Samples:
 		return pairs
 
 
-	def host_tumor_pairs(self, inplace=False):
+	def host_tumor_pairs(self, inplace=True):
 		pairs = self.sample_df.groupby("Microchip")["Tissue"].nunique()
 		pairs = self.sample_df[self.sample_df["Microchip"].isin(pairs[pairs > 1].index.values)]
 		if not inplace:
 			return pairs
+		print(f"Removing {self.sample_df.shape[0] - pairs.shape[0]} rows out of {self.sample_df.shape[0]}")
 		self.sample_df = pairs
 
 
 	def host_tumor_multi(self):
-		pairs = self.host_tumor_pairs()
+		pairs = self.host_tumor_pairs(inplace=False)
 		multi = pairs.groupby(["Microchip", "Tissue"])["Microchip"].count()
 		multi_chips = multi[multi > 1].index.get_level_values("Microchip")
 		return self.sample_df[self.sample_df["Microchip"].isin(multi_chips)].sort_values(by=["Microchip", "Tissue"])
@@ -246,19 +281,30 @@ class Samples:
 		return self.sample_df[self.sample_df["Microchip"].isin(chips)]
 
 
-	def plot_col(self, col, outpath, plot="hist", bins=10):
-		plots = ["hist"]
+	def plot_col(self, col, outpath, plot="hist", bins=10, xlab=None, ylab=None, title=None):
+		plots = ["hist", "bar"]
 		data = self.sample_df[col]
+		title = col if title == None else title
+		xlab = xlab if xlab == None else col
 		if plot == "hist":
+			ylab = ylab if ylab else "Frequency"
 			if bins == "Freedman–Diaconis":
 				q25, q75 = np.percentile(data, [0.25, 0.75])
 				bin_width = 2 * ((q75 - q25) / len(data)**(-1/3))
 				bins = round((data.max() - data.min()) / bin_width)
 			plt.hist(data, bins=bins, density=True)
+		elif plot == "bar":
+			ylab = ylab if ylab else "Count"
+			counts = data.value_counts()
+			x = counts.index.values
+			heights = counts.values
+			plt.bar(x, heights)
 		else:
 			print(f"*plot_col() ERROR* Plot \"{plot}\" does not exist! Use: {', '.join(plots)}")
 			return None
-		plt.ylabel(col)
+		plt.xlabel(xlab)
+		plt.ylabel(ylab)
+		plt.title(title)
 		plt.savefig(outpath)
 		plt.close()
 		print(f"Plot saved to: {outpath}")
@@ -291,7 +337,6 @@ class Samples:
 
 
 	def subset_pairs(self):
-		# indices = self.sample_df.groupby("Microchip")["Microchip"].count()
 		indices = self.get_pairs()
 		indices = indices[indices > 1].index
 		self.sample_df = self.sample_df[self.sample_df["Microchip"].isin(indices)]
@@ -328,17 +373,18 @@ class Samples:
 			return phenotype
 
 
-	def ATOMM_pheno(self, outpath, cols):
+	def ATOMM_pheno(self, outpath, cols, to_pheno=True):
 		tissue = pd.unique(self.sample_df["Tissue"])
 		if len(tissue) < 2:
 			print(f"*WARNING* the sample DF only contains a single tissue ({tissue[0]}), and thus pairs cannot be generated.")
 			print("If this is a TumorSamples object, please specify the argument tissue=\"both\"")
 			print("Exiting")
 			return None
-		if self.sample_df[cols].isna().any(axis=None):
+		host = self.sample_df[self.sample_df["Tissue"] == "Host"]
+		if host[cols].isna().any(axis=None):
 			print("*WARNING* the sample DF contains NA values in some of the columns.")
 			print("If this is unintentional, run: samples.subset_non_nan(my_cols) before writing to a phenotype file")
-		self.host_tumor_pairs(inplace=True)
+		self.host_tumor_pairs()
 		self.__handle_triplets()
 		self.to_vcf_chip()
 		tumor = self.chip_sort(self.sample_df[self.sample_df["Tissue"] == "Tumour"], num_only=True)
@@ -347,7 +393,8 @@ class Samples:
 		host.rename(columns={"Microchip": "host_chip"}, inplace=True)
 		host["tumor_chip"] = tumor["Microchip"]
 		self.sample_df = host
-		self.to_pheno(outpath, cols, id_cols=["host_chip", "tumor_chip"], vcf_chip=False)
+		if to_pheno:
+			self.to_pheno(outpath, cols, id_cols=["host_chip", "tumor_chip"], vcf_chip=False)
 
 
 	def to_pheno(self, outpath, cols, id_cols=["Microchip"], vcf_chip=True):
@@ -473,7 +520,7 @@ class Samples:
 class TumorSamples(Samples):
 	def __init__(self,
 		sample_csv_path=f"{Samples.base}/data/pheno_data/master_corrections.csv",
-		tumor_csv_path=f"{Samples.base}/data/pheno_data/originals/RTumourTableRodrigo.csv",
+		tumor_csv_path=f"{Samples.base}/data/pheno_data/tumorDB.csv",
 		id_paths=[],
 		tissue="Host",
 		extract_on="Host"
@@ -484,7 +531,7 @@ class TumorSamples(Samples):
 		if tissue != "both":
 			self.sample_df = self.sample_df[self.sample_df["Tissue"] == tissue]
 		microchips = self.sample_df["Microchip"].unique()
-		if extract_on != "both":
+		if extract_on != "both" and tissue == "both":
 			microchips = self.sample_df[self.sample_df["Tissue"] == extract_on]["Microchip"].unique()
 		self.tumor_df = tumor_df_full[tumor_df_full["Microchip"].isin(microchips)]
 		self.over_mmax = {"Microchip": [], "volume": []}
@@ -492,7 +539,7 @@ class TumorSamples(Samples):
 
 	
 	# ANALYSIS PHENOTYPE
-	def estimate_age(self):
+	def estimate_age(self, inplace=True, verbose_merge=False):
 		tmp_tumor_df = self.tumor_df[["Microchip", "TrapDate", "TumourDepth", "TumourLength", "TumourWidth"]].copy()
 		dates_df = self.__init_tumor_date(tmp_tumor_df)
 		YOB = self.sample_df[self.sample_df["Tissue"] == "Host"].set_index("Microchip")["YOB"]
@@ -501,6 +548,11 @@ class TumorSamples(Samples):
 		infection_age = (merged["init_tumor_date"] - merged["YOB"]).dt.days
 		infection_age.name = "infection_age"
 		infection_age = infection_age.reset_index()
+		if verbose_merge:
+			merged = merged.drop(columns=["YOB"])
+			infection_age = merged.merge(infection_age, how="left", on="Microchip")
+		if not inplace:
+			return infection_age
 		self.sample_df = self.sample_df.merge(infection_age, how="left", on="Microchip")
 
 
@@ -536,20 +588,34 @@ class TumorSamples(Samples):
 	# 			  date the devil was trapped to get survival in days.
 	# Arguments:
 	# 			  day_cutoff: 	 the minimum number of days a devil must be trapped between two trapping events for inclusion in the analysis <int>
+	# 			  proxy:		 True if the proxy (last_trap - first_trap) should be used over the back-calc survival estimate
 	# 			  verbose_merge: whether the intermediate calculation values should be added to the samples DF. Mostly for debugging <boolean>
 	# Returns:
 	# 			  None. Adds at least a "devil_survival_days" column to the samples DF
 	# Steps:
 	# 			  1) Obtain the difference in days from first to last trapping event
 	# 			  2) Filter out devils with a single trap event or with fewer days between two events which fail the day_cutoff (these are also saved)
-	# 			  3) Back calculate to find the initial tumor data (see __init_tumor_date() for more details)
+	# 			  3) Utilize the survival proxy or back calculated estimate to find the initial tumor data (see __init_tumor_date() for more details)
 	# 			  4) Obtain the date for the most recent trapping event
 	# 			  5) Subtract the tumor initial date from the max trap date to obtain devil survival days
+	# GOTCHAS:
+	# 			  The trap_date_exceptions dictionary contains samples which only contain a single trapping event in the tumorDB but have a second
+	# 			  trapping event found in a different spreadsheet (indicated by source). The days_after indicates how many days the second trapping
+	# 			  was following the first trapping. For multiple trappings, days_after represents the max days following the first trapping
 	# TODO:
 	# 			  The calculated dates often do not match up with Margres et al. (2018) table S1.
 	# 			  Attempt to change the calculation using the sum of all tumor volumes on the min trap date.
 	# 			  Use the Compare class to test calculation similarities
-	def survival_proxy(self, day_cutoff=40, verbose_merge=False):
+	# 
+	# 			  Add trap_date_exceptions (or ensure it's working, can't remember if I fixed this). And if I did, make the method explicitly
+	# 			  mention that exceptions were added (e.g., *4 multi-trap exceptions added*)
+	def survival_proxy(self, day_cutoff=40, proxy=True, verbose_merge=False):
+		trap_date_exceptions = {
+			"Microchip": ["982009106237585", "982009104325244", "982009105151890", "982000405796197"],
+			"days_after": [89, 84, 314, 178],
+			"source": ["captData.csv"]*4
+		}
+
 		tmp_tumor_df = self.tumor_df[["Microchip", "TrapDate", "TumourDepth", "TumourLength", "TumourWidth"]].copy()
 		tmp_tumor_df["TrapDate"] = pd.to_datetime(tmp_tumor_df["TrapDate"])
 		
@@ -558,18 +624,19 @@ class TumorSamples(Samples):
 		self.failed_date_delta = pd.Series(tmp_tumor_df[tmp_tumor_df["date_diff"] < day_cutoff]["Microchip"].unique())
 		tmp_tumor_df = tmp_tumor_df[tmp_tumor_df["date_diff"] >= day_cutoff]
 		
-		dates_df = self.__init_tumor_date(tmp_tumor_df)
+		dates_df = self.__init_tumor_date(tmp_tumor_df, proxy)
 		last_trap = tmp_tumor_df.groupby("Microchip")["TrapDate"].max().loc[dates_df.index]
 		devil_survival_days = last_trap - dates_df["init_tumor_date"]
 		
 		calc_df = pd.DataFrame({
 			"Microchip": dates_df.index.values,
 			"volume (cm^3)": np.round(dates_df["tumor_volume"].values, 2),
-			"back_calc": dates_df["back_calc"].values,
-			"first_trap": dates_df["min_date"].dt.date.values,
 			"last_trap": last_trap.dt.date.values,
 			"init_tumor_date": dates_df["init_tumor_date"].dt.date.values,
 			"devil_survival_days": devil_survival_days.dt.days.values})
+		if not proxy:
+			calc_df.insert(loc=2, column="back_calc", value=dates_df["back_calc"].values)
+			calc_df.insert(loc=3, column="first_trap", value=dates_df["min_date"].dt.date.values)
 		if not verbose_merge:
 			calc_df = calc_df[["Microchip", "devil_survival_days"]]
 		self.sample_df = self.sample_df.merge(calc_df, how="left", on="Microchip")
@@ -594,7 +661,10 @@ class TumorSamples(Samples):
 		found_indices = []
 		for i in range(sample_tumors.shape[0]):
 			current_sample = sample_tumors.iloc[i]
+			print(current_sample["TumourNumber"])
 			found_index = self.tumor_df.loc[(self.tumor_df["Microchip"] == current_sample["Microchip"]) & (self.tumor_df["TumourNumber"] == current_sample["TumourNumber"]) & (pd.to_datetime(self.tumor_df["TrapDate"]) == current_sample["TrappingDate"])]
+			print(self.tumor_df[(self.tumor_df["Microchip"] == current_sample["Microchip"])]["TumourNumber"])
+			exit()
 			found_index = list(found_index.index.values)
 			found_indices += found_index
 		extracted = self.tumor_df.loc[found_indices]
@@ -633,6 +703,54 @@ class TumorSamples(Samples):
 		self.sample_df = subset
 
 
+	# === ANALYSIS PHENOTYPE ===
+	# Definition: 
+	# 			  A modified version of estimate_age() which removes the age effect. This basically looks at how long it took a devil
+	# 			  to contract DFTD after it was able to contract the disease. This correction is done by subtracting one of two things:
+	# 			  the age of the devil when DFTD arrived OR the min infection_age. The age of the devil on DFTD arrival is subtracted
+	# 			  because it is impossible for a devil to get DFTD before the tumor arrives at the devil's site. The min infection_age
+	# 			  subtraction is done becasue it is assumed that, based on devil biting behavior, devils younger than this age will not
+	# 			  engage in social biting and thus cannot contract DFTD. The value subtracted is the higher of the two, as in: assume a
+	# 			  min infection_age of 365d. A devil 800d old on DFTD arrival who gets infected at 850d old has a transmission_age of
+	# 			  50d, because it was impossible for the devil to contract DFTD for the first 800d of its life. However, a devil that is
+	# 			  200d old on DFTD arrival that contracts DFTD at 375d old has a transmission_age of 10d. Although the devil could not
+	# 			  contract DFTD earlier than 200d (due to DFTD not yet existing at its site), the devil was not able to contract DFTD
+	# 			  before 365d old due to behavior, and thus the larger min infection_age is subtracted.
+	# Arguments:
+	# 			  None: Template
+	# Returns:
+	# 			  None. Adds a "transmission_age" column to sample_df
+	# Steps:
+	# 			  1) Obtain the infection_age and arrival_date if it was not already added to sample_df
+	# 			  2) Calculate arrival - YOB, where positive values indicate a devil born X days prior to DFTD arrival
+	# 			  3) For any arrival - YOB less than min infection_age, set the value to 0
+	# 			  4) Make a min infection_age Series, setting any value to 0 which is not 0 in the arrival - YOB
+	# 				 NOTE: This and 3) ensure that only YOB - arrival OR min infection_age (whichever is larger) is subtracted from infection_age
+	# 			  5) Subtract YOB - arrival OR min infection_age from infection age (this removes the non-viable devil infection period)
+	# 			  6) Restore the original sample_df (which may not have had estimate_age or add_survival)
+	# Gotchas:
+	# 			  Devil 982009104872893 has a negative transmission_age (check for more when I have >312 samples extracted)
+	# 
+	# 			  The correction ALWAYS generates at least a single 0 value. When log transforming, this will be -inf. For now, manually correct
+	# 			  this to a sensible value smaller than all other values
+	# 
+	# 			  Tumor transmission_age values are also often nonsense. This is expected, ensure these are ignored for tumors (only hosts can have infection/transmission age)
+	def transmission(self):
+		original_df = self.sample_df.copy()
+		if not "infection_age" in self.sample_df.columns:
+			self.estimate_age()
+		if not "arrival_date" in self.sample_df.columns:
+			self.add_arrival()
+		min_age = self.sample_df["infection_age"].min()
+		born_before_arrival = (self.sample_df["arrival_date"] - self.sample_df["YOB"]).dt.days.copy()
+		born_before_arrival[born_before_arrival < min_age] = 0
+		min_series = pd.Series([min_age] * len(born_before_arrival))
+		min_series.loc[born_before_arrival[born_before_arrival != 0].index] = 0
+		transmission_age = self.sample_df["infection_age"] - born_before_arrival - min_series
+		self.sample_df = original_df
+		self.sample_df["transmission_age"] = transmission_age
+
+
 	# ANALYSIS PHENOTYPE
 	def tumor_count(self):
 		num_tumors = self.tumor_df.groupby(["Microchip"])["TumourNumber"].unique().str.len()
@@ -656,6 +774,7 @@ class TumorSamples(Samples):
 	# 			  mmax: 		 max tumor size in cm^3 (from growth model) <int>
 	# 			  init_size: 	 initial tumor size (from growth model) <int>
 	# 			  alpha: 		 scale parameter of the logistic growth curve (from growth model) <int>
+	# 			  mmax_cutoff:	 how much over mmax can be before discarding the sample (these over values are set to vol=200)
 	# 			  is_cm: 		 flag if the incoming volume is in centimeters <boolean>
 	# 			  round_flag: 	 flag if the back calculated volumes should be rounded to the nearest int <boolean>
 	# Returns:
@@ -668,7 +787,7 @@ class TumorSamples(Samples):
 	# Gotchas:
 	# 			  Formula domain: (0, mmax)
 	# 			  Formula range: (-inf, 0); as volume -> mmax, days -> -inf
-	def __growth_back_calculation(self, tumor_volumes, mmax=202, init_size=0.0003, alpha=0.03, is_cm=False, round_flag=True):
+	def __growth_back_calculation(self, tumor_volumes, mmax=202, init_size=0.0003, alpha=0.03, mmax_cutoff=100, is_cm=False, round_flag=True):
 		tumor_volumes = tumor_volumes.copy()
 		if not is_cm:
 			tumor_volumes /= 1000
@@ -676,6 +795,9 @@ class TumorSamples(Samples):
 		if over.size > 0:
 			vstring = "volumes" if len(over) > 1 else "volume"
 			print(f"*WARNING* found {len(over)} {vstring} greater than mmax while performing the back calculation (try print_over_mmax() for details)")
+			acceptable_range = over[over <= mmax + mmax_cutoff]
+			print(f"{acceptable_range.size} of these are within the {mmax_cutoff} cutoff, setting these to volume=200 cm^3")
+			tumor_volumes[((tumor_volumes + 1) >= mmax) & (tumor_volumes <= mmax + mmax_cutoff)] = 200
 			tumor_volumes[(tumor_volumes + 1) >= mmax] = np.nan
 		if self.over_mmax["Microchip"]:
 			over = over.drop(self.over_mmax["Microchip"])
@@ -691,7 +813,7 @@ class TumorSamples(Samples):
 	# Definition: 
 	# 			  Obtain the tumor volume Series for the minimum capture date with microchips as the index.
 	# 			  When a host has multiple tumors, different grouping functions can be used (e.g., max or sum). 
-	# 			  If this is being used with the growth back calculation, max should set for mode. Drops rows with an NA measurement.
+	# 			  If this is being used with the growth back calculation, max should be set for mode. Drops rows with an NA measurement.
 	# Arguments:
 	#			  tumor_df: a DF with at least the following cols: Microchip, TrapDate, TumourDepth, TumourLength, TumourWidth <pd.DataFrame>
 	# 			  mode: 	method of selecting a single volume when multiple tumors are present at the same date <string>
@@ -735,21 +857,26 @@ class TumorSamples(Samples):
 	# 			  This is  a convenience function combining the functionality of __min_cap_volume()
 	# 			  and __growth_back_calculation() to find the initial tumor date.
 	# Arguments:
-	# 			  tumor_df: a DF with at least the following cols: Microchip, TrapDate, TumourDepth, TumourLength, TumourWidth <pd.DataFrame>
+	# 			  tumor_df:   a DF with at least the following cols: Microchip, TrapDate, TumourDepth, TumourLength, TumourWidth <pd.DataFrame>
+	# 			  proxy_flag: True if using a basic for the init date (i.e., first date trapped with a tumor present). Otherwise, employ the back-calc to estimate the init tumor date
 	# Returns:
 	# 			  a DF with Microchip as the index and the following cols: tumor_volume, min_date, back_calc, init_tumor_date
 	# Steps:
 	# 			  1) Run __min_cap_volume() and __growth_back_calculation
 	# 			  2) Get the initial tumor date by subtracting the back calc from the min date
 	# 			  3) Combine everything into a DF
-	def __init_tumor_date(self, tumor_df):
+	def __init_tumor_date(self, tumor_df, proxy_flag):
 		volumes = self.__min_cap_volume(tumor_df)
 		volumes["tumor_volume"] /= 1000
-		back_calc = self.__growth_back_calculation(volumes["tumor_volume"], is_cm=True)
-		init_tumor_dates = volumes["min_date"] - pd.to_timedelta(-1 * back_calc, unit="d")
-		init_tumor_dates.name = "init_tumor_date"
-		back_calc = pd.Series(back_calc, name="back_calc", index=volumes.index)
-		return pd.concat([volumes, back_calc, init_tumor_dates], axis=1)
+		if not proxy_flag:
+			back_calc = self.__growth_back_calculation(volumes["tumor_volume"], is_cm=True)
+			init_tumor_dates = volumes["min_date"] - pd.to_timedelta(-1 * back_calc, unit="d")
+			init_tumor_dates.name = "init_tumor_date"
+			back_calc = pd.Series(back_calc, name="back_calc", index=volumes.index)
+			final_df = pd.concat([volumes, back_calc, init_tumor_dates], axis=1)
+		else:
+			final_df = volumes.rename(columns={"min_date": "init_tumor_date"})
+		return final_df
 
 
 
