@@ -10,7 +10,8 @@ import matplotlib.pyplot as plt
 
 class Samples:
 	base = "/shares_bgfs/margres_lab/Devils/BEE_Probe_Data"
-	batch_ids = [f"{base}/Capture1_6-11-21/rename_key.csv", f"{base}/Capture2_7-29-21/rename_key.csv", f"{base}/Capture3/rename_key.csv", f"{base}/Capture4/rename_key.csv", f"{base}/Capture5/rename_key.csv"]
+	seq_base = f"{base}/data/sequencing"
+	batch_ids = [f"{seq_base}/Capture1/rename_key.csv", f"{seq_base}/Capture2/rename_key.csv", f"{seq_base}/Capture3/rename_key.csv", f"{seq_base}/Capture4/rename_key.csv", f"{seq_base}/Capture5/rename_key.csv"]
 	prelim = batch_ids[:2]
 	dftd_site_arrival = pd.DataFrame({
 		"Site": ["Freycinet", "WPP", "Takone", "Black River", "Arthur River"],
@@ -61,14 +62,6 @@ class Samples:
 		if reset_index:
 			sort_df.reset_index(drop=True, inplace=True)
 		return sort_df
-
-
-	# def col_math(self, cols, method, inplace=True):
-	# 	methods = ["add", "sub", "mult", "divide"]
-	# 	if method not in methods:
-	# 		print(f"*WARNING* method \"{method}\" is not supported. Please select one of the following methods: {', '.join(methods)}")
-	# 	if method == "add":
-	# 		result = 
 
 
 	def compare_to(self, df_path, cols, sep=",", id_col="Microchip", inplace=True):
@@ -397,7 +390,7 @@ class Samples:
 			self.to_pheno(outpath, cols, id_cols=["host_chip", "tumor_chip"], vcf_chip=False)
 
 
-	def to_pheno(self, outpath, cols, id_cols=["Microchip"], vcf_chip=True):
+	def to_pheno(self, outpath, cols, id_cols=["Microchip"], vcf_chip=True, sep="\t"):
 		if vcf_chip:
 			self.to_vcf_chip()
 		pheno_df = self.sample_df[id_cols + cols]
@@ -406,7 +399,7 @@ class Samples:
 		factor_out = f"{outdir}_FACTOR_KEY.txt"
 		self.factor_file(factor_out, cols=cols, silent=True)
 		print(f"Writing phenotype file to: {outpath}")
-		pheno_df.to_csv(outpath, index=False, sep="\t")
+		pheno_df.to_csv(outpath, index=False, sep=sep)
 
 
 	def to_vcf_chip(self, inplace=True):
@@ -703,6 +696,15 @@ class TumorSamples(Samples):
 		self.sample_df = subset
 
 
+	def subset_unextracted(self, inplace=True):
+		unextracted_mchips = self.tumor_df["Microchip"].unique()
+		subset = self.sample_df[~self.sample_df["Microchip"].isin(unextracted_mchips)]
+		if not inplace:
+			return subset
+		print("*WARNING* This will break all functionality of the TumorSamples class!")
+		self.sample_df = subset
+
+
 	# === ANALYSIS PHENOTYPE ===
 	# Definition: 
 	# 			  A modified version of estimate_age() which removes the age effect. This basically looks at how long it took a devil
@@ -759,9 +761,9 @@ class TumorSamples(Samples):
 		self.sample_df = self.sample_df.merge(num_tumors, how="left", on="Microchip")
 
 
-	def unextracted(self):
-		extracted_mchips = self.tumor_df["Microchip"].unique()
-		return self.sample_df[~self.sample_df["Microchip"].isin(extracted_mchips)]
+	# def unextracted(self):
+	# 	extracted_mchips = self.tumor_df["Microchip"].unique()
+	# 	return self.sample_df[~self.sample_df["Microchip"].isin(extracted_mchips)]
 
 
 	# Definition: 
@@ -893,28 +895,36 @@ class TumorSamples(Samples):
 
 
 class Compare:
-	def __init__(self, df, cols):
-		self.df = df
-		self.cols = cols
-		self.matched = pd.DataFrame([])
-		self.unmatched = pd.DataFrame([])
+	def __init__(self, df, extract_path, sep="\t", id="Microchip"):
+		extract_df = pd.read_csv(extract_path, sep=sep)
+		extract_df = extract_df.rename(columns={"mchip": "Microchip"})
+		merged_df = df.merge(extract_df, how="inner", on=id)
+		self.id = id
+		self.df = merged_df
+		self.matched = pd.Series()
+		self.unmatched = pd.Series()
 
 
-	def compare_strict(self):
-		self.matched = self.df[self.df[self.cols[0]] == self.df[self.cols[1]]]
-		self.unmatched = self.df[self.df[self.cols[0]] != self.df[self.cols[1]]]
+	def compare_strict(self, col1, col2):
+		self.matched = self.df[self.df[col1] == self.df[col2]][[self.id, col1, col2]]
+		self.unmatched = self.df[self.df[col1] != self.df[col2]][[self.id, col1, col2]]
+		self.comp_cols = [col1, col2]
+
+
+	def df_print(self, cols):
+		print(self.df[cols])
 
 
 	def diff(self, n=1, biggest=True):
-		first = self.unmatched[self.cols[0]]
-		second = self.unmatched[self.cols[1]]
+		first = self.unmatched[self.comp_cols[0]]
+		second = self.unmatched[self.comp_cols[1]]
 		abs_diffs = sorted((first - second).abs(), reverse=biggest)
 		return abs_diffs[0:n]
 
 
 	def diff_stats(self):
-		first = self.unmatched[self.cols[0]]
-		second = self.unmatched[self.cols[1]]
+		first = self.unmatched[self.comp_cols[0]]
+		second = self.unmatched[self.comp_cols[1]]
 		abs_diffs = (first - second).abs()
 		mean = abs_diffs.mean()
 		median = abs_diffs.median()
@@ -922,13 +932,13 @@ class Compare:
 
 
 	def show_diff(self, print_only=True):
-		first = self.unmatched[self.cols[0]]
-		second = self.unmatched[self.cols[1]]
+		first = self.unmatched[self.comp_cols[0]]
+		second = self.unmatched[self.comp_cols[1]]
 		abs_diffs = (first - second).abs()
 		diff_frame = pd.DataFrame({
 			"Microchip": self.unmatched["Microchip"],
-			self.cols[0]: first,
-			self.cols[1]: second,
+			self.comp_cols[0]: first,
+			self.comp_cols[1]: second,
 			"diff": abs_diffs
 			})
 		if print_only:
@@ -949,3 +959,7 @@ class Compare:
 		print(f"Smallest difference: {self.diff(biggest=False)[0]}")
 		print(f"Mean difference: {mean:.1f}")
 		print(f"Median difference: {median}")
+
+
+	def subset_non_nan(self, col):
+		self.df = self.df[~self.df[col].isna()]
