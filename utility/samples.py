@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 
 class Samples:
-	base = "/shares_bgfs/margres_lab/Devils/BEE_Probe_Data"
+	base = "/work/d/dgallinson/shares_bgfs"
 	seq_base = f"{base}/data/sequencing"
 	batch_ids = [f"{seq_base}/Capture1/rename_key.csv", f"{seq_base}/Capture2/rename_key.csv", f"{seq_base}/Capture3/rename_key.csv", f"{seq_base}/Capture4/rename_key.csv", f"{seq_base}/Capture5/rename_key.csv"]
 	prelim = batch_ids[:2]
@@ -124,7 +124,22 @@ class Samples:
 		return expected_pairs
 
 
-	def extract_samples(self, chip_list):
+	# Parameter lib_list can be a list of L0123 IDs or a string range as: L0960-L1056
+	def extract_libnum(self, lib_list, inplace=True):
+		if isinstance(lib_list, str):
+			lib_list = lib_list.replace(" ", "")
+			lib_list = lib_list.replace("L", "")
+			lib_list = lib_list.split("-")
+			start = int(lib_list[0])
+			end = int(lib_list[1]) + 1
+			lib_list = [f"L{i:04d}" for i in range(start, end)]
+		extracted = self.sample_df[self.sample_df["Library number"].isin(lib_list)]
+		if not inplace:
+			return extracted
+		self.sample_df = extracted
+
+
+	def extract_mchips(self, chip_list):
 		found = []
 		for chip in chip_list:
 			last_six = chip[-6:]
@@ -530,6 +545,7 @@ class Samples:
 
 
 
+
 class TumorSamples(Samples):
 	def __init__(self,
 		sample_csv_path=f"{Samples.base}/data/pheno_data/master_corrections.csv",
@@ -537,27 +553,83 @@ class TumorSamples(Samples):
 		id_paths=[],
 		drop_DFTG=5,
 		tissue="Host",
-		extract_on="Host"
+		extract_on="Host",
+		full_tumor_df=False
 		):
 		super().__init__(sample_csv_path, id_paths)
 		dates = ["TrapDate"]
-		tumor_df_full = pd.read_csv(tumor_csv_path, dtype={"TumourNumber": str}, parse_dates=dates)
+		int_cols = ["TumourNumCertainty", "TumourMerged", "TumourDFTG", "TumourUlcerated", "TumourSecondaryInfection", "TumourBiopsy"]
+		str_cols = ["Microchip", "TumourID", "TumourNumber"]
+		int_cols = {col: "Int64" for col in int_cols}
+		str_cols = {col: str for col in str_cols}
+		type_dict = {**str_cols, **int_cols}
+		tumor_df_full = pd.read_csv(tumor_csv_path, dtype=type_dict, parse_dates=dates, na_values="n")
 		if tissue != "both":
 			self.sample_df = self.sample_df[self.sample_df["Tissue"] == tissue]
+			if self.sample_df.size == 0:
+				print(f"!WARNING! sample_df has no entries! Tissue subsetted to \"{tissue}\", ensure spelling and capitalization is correct")
 		microchips = self.sample_df["Microchip"].unique()
 		if extract_on != "both" and tissue == "both":
 			microchips = self.sample_df[self.sample_df["Tissue"] == extract_on]["Microchip"].unique()
-		self.tumor_df = tumor_df_full[tumor_df_full["Microchip"].isin(microchips)]
+		if not full_tumor_df:
+			self.tumor_df = tumor_df_full[tumor_df_full["Microchip"].isin(microchips)]
+		else:
+			self.tumor_df = tumor_df_full
 		self.drop_DFTG = drop_DFTG
 		if drop_DFTG:
-			mchip_before = self.tumor_df["Microchip"].unique()
-			self.removed_tumors, self.tumor_df = self.__drop_DFTG(self.tumor_df, drop_DFTG)
-			mchip_after = self.tumor_df["Microchip"].unique()
-			self.removed_samples_N = mchip_before.shape[0] - mchip_after.shape[0]
-			bool_mask = np.in1d(mchip_before, mchip_after)
-			self.removed_samples = mchip_before[~bool_mask]
-		self.over_mmax = {"Microchip": [], "volume": []}
+			self.tumor_df, self.removed_samples, self.removed_tumors = self.__drop_DFTG(self.tumor_df, drop_DFTG)
+		# print(self.tumor_df[self.tumor_df["Microchip"] == "FNP000000000407"][["Microchip", "TumourNumber", "TumourDFTG"]])
+		# print(self.tumor_df[["Microchip", "TumourNumber", "TumourDFTG"]])
 		self.failed_date_delta = []
+
+
+	def add_tumor_samples(self, df, dup_cols, DFTG_filter=5, sample_df_only=True, date_diff_tolerance=3, print_found=True):
+		df = df.copy()
+		tumor_cols = self.tumor_df.columns.values.tolist()
+		df_cols = df.columns.values.tolist()
+		col_check = [True if col in tumor_cols else False for col in df_cols]
+		if not all(col_check):
+			col_check = np.array(col_check)
+			df_cols = np.array(df_cols)
+			print(f"!FAILED! The following columns are not in the Tumour Table: {', '.join(df_cols[~col_check])}")
+			print("Please ensure that columns in the incoming DF are present in the Tumour Table")
+			return None
+		type_dict = dict(self.tumor_df[df_cols].dtypes)
+		df = df.astype(type_dict)
+		df["Microchip"] = df["Microchip"].astype(str)
+		if DFTG_filter:
+			df = df[df["TumourDFTG"] >= DFTG_filter]
+		df = df.dropna(subset=dup_cols)
+		df = df[~df.duplicated(subset=dup_cols)]
+		dup_df = self.tumor_df[dup_cols].copy()
+		dup_df = dup_df.dropna()
+		dup_df["tumorDB"] = True
+
+		merge_dups = pd.concat([dup_df, df])
+		marked_dups = merge_dups.duplicated(subset=dup_cols, keep=False)
+		final_df = merge_dups[~marked_dups]
+		final_df = final_df[final_df["tumorDB"] != True]
+		final_df = final_df.drop(columns="tumorDB")
+		print(f"Found {final_df.shape[0]} new rows")
+		if sample_df_only:
+			final_df = final_df[final_df["Microchip"].isin(self.sample_df["Microchip"].unique())]
+			print(f"Found {final_df.shape[0]} rows after subsetting on sample_df rows only")
+		if date_diff_tolerance:
+			maintained_rows = []
+			for i in range(final_df.shape[0]):
+				current_row = final_df.iloc[i]
+				tumor_samples = self.tumor_df[self.tumor_df["Microchip"] == current_row["Microchip"]]
+				min_date_diff = abs((tumor_samples["TrapDate"] - current_row["TrapDate"])).min().days
+				if min_date_diff >= date_diff_tolerance or tumor_samples.empty:
+					maintained_rows.append(i)
+			final_df = final_df.iloc[maintained_rows]
+			print(f"Found {final_df.shape[0]} rows differing by at least {date_diff_tolerance} days")
+			merged_final = pd.concat([self.tumor_df, final_df]).sort_values(by=["Microchip", "TrapDate"])
+		if print_found:
+			print(final_df.to_string(index=False))
+			print(f"Total new rows found: {final_df.shape[0]}")
+			print(f"Total rows in tumor_df: {merged_final.shape[0]}")
+		return merged_final
 
 	
 	# ANALYSIS PHENOTYPE
@@ -593,14 +665,19 @@ class TumorSamples(Samples):
 		chip_date_cluster = self.tumor_df.groupby(["Microchip", "TrapDate"])["TrapDate"].count()
 		trap_cluster = chip_date_cluster.groupby("Microchip").count()
 		traps = self.tumor_df.groupby("Microchip")["TrapDate"].count()
+		tumor_percent = (in_tumor_db/sample_n)*100
+		tumor_percent_uniq = (unique_tumor_finds/unique_samples)*100
 
 		print(f"===== {tissue} =====")
-		print(f"Found in tumor DB: {(in_tumor_db/sample_n)*100:.1f}% ({in_tumor_db}/{sample_n})")
-		print(f"Found in tumor DB (unique mchips): {(unique_tumor_finds/unique_samples)*100:.1f}% ({unique_tumor_finds}/{unique_samples})")
-		print(f"Individual tumors removed (min DFTG={self.drop_DFTG}): {self.removed_tumors}")
-		print(f"Samples removed with DFTG < {self.drop_DFTG}: {self.removed_samples_N}")
+		print(f"Found in tumor DB: {tumor_percent:.1f}% ({in_tumor_db}/{sample_n})")
+		print(f"Found in tumor DB (unique mchips): {tumor_percent_uniq:.1f}% ({unique_tumor_finds}/{unique_samples})")
+		print(f"Individual tumors removed (min DFTG={self.drop_DFTG}): {self.removed_tumors['Microchip'].unique().shape[0]}")
+		print(f"Samples removed with DFTG < {self.drop_DFTG}: {self.removed_samples['Microchip'].unique().shape[0]}")
 		print(f"1 trap: {len(trap_cluster[trap_cluster == 1])}")
 		print(f"More than 1 trap: {len(trap_cluster[trap_cluster > 1])}")
+
+		if tumor_percent > 100 or tumor_percent_uniq > 100:
+			print("!WARNING! Tumor DB extraction rate is above 100%, is the tumor DF out of sync? Try sync_tumor_df()")
 
 
 	# === ANALYSIS PHENOTYPE ===
@@ -623,23 +700,12 @@ class TumorSamples(Samples):
 	# 			  4) Obtain the date for the most recent trapping event
 	# 			  5) Subtract the tumor initial date from the max trap date to obtain devil survival days
 	# GOTCHAS:
-	# 			  The trap_date_exceptions dictionary contains samples which only contain a single trapping event in the tumorDB but have a second
-	# 			  trapping event found in a different spreadsheet (indicated by source). The days_after indicates how many days the second trapping
-	# 			  was following the first trapping. For multiple trappings, days_after represents the max days following the first trapping
+	# 			  None
 	# TODO:
 	# 			  The calculated dates often do not match up with Margres et al. (2018) table S1.
 	# 			  Attempt to change the calculation using the sum of all tumor volumes on the min trap date.
 	# 			  Use the Compare class to test calculation similarities
-	# 
-	# 			  Add trap_date_exceptions (or ensure it's working, can't remember if I fixed this). And if I did, make the method explicitly
-	# 			  mention that exceptions were added (e.g., *4 multi-trap exceptions added*)
 	def survival_proxy(self, day_cutoff=40, proxy=True, verbose_merge=False):
-		trap_date_exceptions = {
-			"Microchip": ["982009106237585", "982009104325244", "982009105151890", "982000405796197"],
-			"days_after": [89, 84, 314, 178],
-			"source": ["captData.csv"]*4
-		}
-
 		tmp_tumor_df = self.tumor_df[["Microchip", "TrapDate", "TumourDepth", "TumourLength", "TumourWidth"]].copy()
 		tmp_tumor_df["TrapDate"] = pd.to_datetime(tmp_tumor_df["TrapDate"])
 		
@@ -647,7 +713,7 @@ class TumorSamples(Samples):
 		tmp_tumor_df["date_diff"] = date_diff.dt.days
 		self.failed_date_delta = pd.Series(tmp_tumor_df[tmp_tumor_df["date_diff"] < day_cutoff]["Microchip"].unique())
 		tmp_tumor_df = tmp_tumor_df[tmp_tumor_df["date_diff"] >= day_cutoff]
-		
+
 		dates_df = self.__init_tumor_date(tmp_tumor_df, proxy)
 		last_trap = tmp_tumor_df.groupby("Microchip")["TrapDate"].max().loc[dates_df.index]
 		devil_survival_days = last_trap - dates_df["init_tumor_date"]
@@ -679,8 +745,16 @@ class TumorSamples(Samples):
 		return trap_nums[trap_nums == trap_N].index
 
 
-	def get_DFTG_removed(self):
-		return self.removed_samples
+	def get_DFTG_removed(self, remove_type="sample", cols=["Microchip", "TrapDate", "TumourNumber", "TumourDFTG"]):
+		if not cols:
+			cols = self.tumor_df.columns
+		if remove_type == "sample":
+			return self.removed_samples[cols]
+		elif remove_type == "tumor":
+			return self.removed_tumors[cols]
+		else:
+			print(f"{remove_type} not recognized as a remove_type! Please use: \"sample\" or \"tumor\"")
+			return None
 
 
 	def get_sample_tumors(self, stats=False, date_tolerance=100):
@@ -692,11 +766,9 @@ class TumorSamples(Samples):
 		for i in range(sample_tumors.shape[0]):
 			current_sample = sample_tumors.iloc[i]
 			found_index = self.tumor_df.loc[(self.tumor_df["Microchip"] == current_sample["Microchip"]) & (self.tumor_df["TumourNumber"] == current_sample["TumourNumber"])]
-			if found_index.size == 0:
-				print(current_sample[["Microchip", "TumourNumber"]])
 			if found_index.shape[0] > 1:
 				date_diff = current_sample["TrappingDate"] - found_index[["TrapDate"]]
-				diff_val = date_diff["TrapDate"].min().days
+				diff_val = abs(date_diff["TrapDate"].min().days)
 				if diff_val > 0:
 					date_mismatch[current_sample["Microchip"]] = diff_val
 				found_index = [date_diff.idxmin()[0]]
@@ -707,13 +779,18 @@ class TumorSamples(Samples):
 				found_index = list(found_index.index.values)
 			found_indices += found_index
 		extracted = self.tumor_df.loc[found_indices]
+		for k,v in date_mismatch.items():
+			print(f"{k}: {v}")
 		if stats:
+			mismatch_days = date_mismatch.values()
 			not_extracted = sample_subset[~sample_subset["Microchip"].isin(extracted["Microchip"])]
 			not_extracted = not_extracted["Microchip"].unique()[:3]
 			print(f"To extract: {sample_subset.shape[0]}")
 			print(f"Extracted: {extracted.shape[0]}")
 			print(f"Not extracted: {sample_subset.shape[0] - extracted.shape[0]}")
 			print(f"NaN TrappingDate (sample_df): {len(nan_traps)}")
+			print(f"Number of date mismatches: {len(mismatch_days)}")
+			print(f"Mean date mismatch (days): {round(sum(mismatch_days)/len(mismatch_days))}")
 			print(f"Failed mchips: {','.join(not_extracted)}")
 		return extracted
 
@@ -750,6 +827,14 @@ class TumorSamples(Samples):
 			return subset
 		print("*WARNING* This will break all functionality of the TumorSamples class!")
 		self.sample_df = subset
+
+
+	def sync_tumor_df(self):
+		sample_mchip = self.sample_df["Microchip"].unique()
+		before = self.tumor_df.shape[0]
+		self.tumor_df = self.tumor_df[self.tumor_df["Microchip"].isin(sample_mchip)]
+		after = self.tumor_df.shape[0]
+		print(f"Removed {before-after} tumor samples ({after} tumor samples remaining)")
 
 
 	# === ANALYSIS PHENOTYPE ===
@@ -810,10 +895,10 @@ class TumorSamples(Samples):
 
 	def __drop_DFTG(self, df, min_score):
 		df = df.copy()
-		df.loc[df["TumourDFTG"] == "n", "TumourDFTG"] = "0"
-		df["TumourDFTG"] = df["TumourDFTG"].astype(np.int32)
+		df.loc[df["TumourDFTG"].isna(), "TumourDFTG"] = 0
+		df.loc[df["TumourNumber"].isna(), "TumourNumber"] = "n"
 		passed_indices = []
-		removed_count = 0
+		removed_indices = []
 		for chip in df["Microchip"].unique():
 			sample = df[df["Microchip"] == chip]
 			for tumor_num in sample["TumourNumber"].unique():
@@ -822,8 +907,15 @@ class TumorSamples(Samples):
 				if max_DFTG >= min_score:
 					passed_indices += tumor.index.values.tolist()
 				else:
-					removed_count += 1
-		return removed_count, df.loc[passed_indices]
+					removed_indices += tumor.index.values.tolist()
+		removed_tumors = df.loc[removed_indices]
+		cleaned_df = df.loc[passed_indices]
+		df_chips = df["Microchip"].unique()
+		cleaned_chips = cleaned_df["Microchip"].unique()
+		bool_mask = np.in1d(df_chips, cleaned_chips)
+		removed_sample_chips = df_chips[~bool_mask]
+		removed_samples = df[df["Microchip"].isin(removed_sample_chips)]
+		return cleaned_df, removed_samples, removed_tumors
 
 
 	# Definition: 
