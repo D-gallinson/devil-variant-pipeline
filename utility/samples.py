@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 
 class Samples:
-	base = "/work/d/dgallinson/shares_bgfs"
+	base = "/shares_bgfs/margres_lab/Devils/BEE_Probe_Data"
 	seq_base = f"{base}/data/sequencing"
 	batch_ids = [f"{seq_base}/Capture1/rename_key.csv", f"{seq_base}/Capture2/rename_key.csv", f"{seq_base}/Capture3/rename_key.csv", f"{seq_base}/Capture4/rename_key.csv", f"{seq_base}/Capture5/rename_key.csv"]
 	prelim = batch_ids[:2]
@@ -578,8 +578,7 @@ class TumorSamples(Samples):
 		self.drop_DFTG = drop_DFTG
 		if drop_DFTG:
 			self.tumor_df, self.removed_samples, self.removed_tumors = self.__drop_DFTG(self.tumor_df, drop_DFTG)
-		# print(self.tumor_df[self.tumor_df["Microchip"] == "FNP000000000407"][["Microchip", "TumourNumber", "TumourDFTG"]])
-		# print(self.tumor_df[["Microchip", "TumourNumber", "TumourDFTG"]])
+		self.over_mmax = {"Microchip": [], "volume": []}
 		self.failed_date_delta = []
 
 
