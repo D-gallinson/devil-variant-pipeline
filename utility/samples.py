@@ -199,8 +199,8 @@ class Samples:
 
 
 	def fast_stats(self):
-		pairs = len(self.host_tumor_pairs(inplace=False)["Microchip"])
-		singles = self.sample_df.shape[0] - pairs
+		pairs = self.host_tumor_pairs(inplace=False)["Microchip"]
+		singles = self.sample_df.shape[0] - len(pairs)
 		multi = len(self.host_tumor_multi()["Microchip"])
 		print(f"Samples: {self.sample_df.shape[0]}")
 		print(f"Hosts: {self.sample_df[self.sample_df['Tissue'] == 'Host'].shape[0]}")
@@ -208,7 +208,8 @@ class Samples:
 		print(f"Missing microchips: {self.nan_sum('Microchip', print_flag=False)}")
 		print(f"Unique microchips: {len(self.sample_df['Microchip'].unique())}")
 		print(f"Singles: {singles}")
-		print(f"Pairs: {pairs}")
+		print(f"Pairs (individuals): {len(pairs)}")
+		print(f"Pairs: {len(pairs.unique())}")
 		print(f"Multi tumor/host: {multi}")
 
 
@@ -239,7 +240,7 @@ class Samples:
 		pairs = self.sample_df[self.sample_df["Microchip"].isin(pairs[pairs > 1].index.values)]
 		if not inplace:
 			return pairs
-		print(f"Removing {self.sample_df.shape[0] - pairs.shape[0]} rows out of {self.sample_df.shape[0]}")
+		print(f"*host_tumor_pairs()* Removing {self.sample_df.shape[0] - pairs.shape[0]} rows out of {self.sample_df.shape[0]}  ({pairs.shape[0]} remaining)")
 		self.sample_df = pairs
 
 
@@ -384,20 +385,31 @@ class Samples:
 	def subset(self, col, pattern, inplace=True):
 		subset = self.sample_df[self.sample_df[col] == pattern]
 		if inplace:
-			print(f"Removing {self.sample_df.shape[0] - subset.shape[0]} rows out of {self.sample_df.shape[0]}")
+			print(f"*subset()* Removing {self.sample_df.shape[0] - subset.shape[0]} rows out of {self.sample_df.shape[0]} ({subset.shape[0]} remaining)")
 		if not inplace:
 			return subset
 		self.sample_df = subset
 
 
-	def subset_arrival(self):
-		subset = self.sample_df.dropna(subset=["YOB", "Site"])
-		subset = self.add_arrival(inplace=False)
+	def subset_arrival(self, WPP_tetraploid=True, inplace=True):
+		tumors = self.sample_df[self.sample_df["Tissue"] == "Tumour"].size > 0
+		if tumors:
+			tumor_df = self.subset("Tissue", "Tumour", inplace=False)
+		if WPP_tetraploid:
+			self.alter_arrival("WPP", 2011)
+		self.add_arrival()
+		subset = self.subset("Tissue", "Host", inplace=False)
+		subset = subset.dropna(subset=["YOB", "Site"])
 		subset["date_diff"] = (subset["YOB"] - subset["arrival_date"]).dt.days
-		subset = subset[subset["date_diff"] >= 0]
-		if inplace:
-			print(f"Removing {self.sample_df.shape[0] - subset.shape[0]} rows out of {self.sample_df.shape[0]}")
-		self.sample_df = subset.drop(columns=["arrival_date", "date_diff"])
+		final = subset[subset["date_diff"] >= 0]
+		if tumors:
+			final = pd.concat([final, tumor_df])
+			final = final.sort_index()
+		final = final.drop(columns=["arrival_date", "date_diff"])
+		if not inplace:
+			return final
+		print(f"*subset_arrival()* Removing {self.sample_df.shape[0] - final.shape[0]} rows out of {self.sample_df.shape[0]} ({final.shape[0]} remaining)")
+		self.sample_df = final
 
 
 	def subset_pairs(self):
@@ -409,7 +421,7 @@ class Samples:
 	def subset_non_dup(self, keep="first"):
 		start = self.sample_df.shape[0]
 		self.sample_df = self.sample_df[~self.sample_df.duplicated(subset=["Microchip"], keep=keep)]
-		print(f"Removing {start - self.sample_df.shape[0]} out of {start} duplicate Microchips")
+		print(f"*subset_non_dup()* Removing {start - self.sample_df.shape[0]} out of {start} duplicate Microchips ({self.sample_df.shape[0]} remaining)")
 
 
 	def subset_non_nan(self, col, verbose=True):
@@ -417,7 +429,7 @@ class Samples:
 		if isinstance(col, list):
 			na = na.any(axis=1)
 		if verbose:
-			print(f"Removing {na.values.sum()} rows out of {self.sample_df.shape[0]}")
+			print(f"*subset_non_nan()* Removing {na.values.sum()} rows out of {self.sample_df.shape[0]} ({self.sample_df.shape[0] - na.values.sum()} remaining)")
 		self.sample_df = self.sample_df[~na]
 
 
@@ -443,7 +455,7 @@ class Samples:
 			return phenotype
 
 
-	def ATOMM_pheno(self, outpath, cols, to_pheno=True):
+	def ATOMM_pheno(self, outpath, cols, to_pheno=True, to_ATOMM=False):
 		tissue = pd.unique(self.sample_df["Tissue"])
 		if len(tissue) < 2:
 			print(f"*WARNING* the sample DF only contains a single tissue ({tissue[0]}), and thus pairs cannot be generated.")
@@ -463,8 +475,15 @@ class Samples:
 		host.rename(columns={"Microchip": "host_chip"}, inplace=True)
 		host["tumor_chip"] = tumor["Microchip"]
 		self.sample_df = host
-		if to_pheno:
+		if to_pheno and not to_ATOMM:
 			self.to_pheno(outpath, cols, id_cols=["host_chip", "tumor_chip"], vcf_chip=False)
+		if to_ATOMM:
+			ids = [i for i in range(1, self.sample_df.shape[0] + 1)]
+			intercept = [1 for i in range(1, self.sample_df.shape[0] + 1)]
+			ATOMM_df = pd.DataFrame({"host": ids, "patho": ids, "inter": intercept})
+			ATOMM_df = pd.concat([ATOMM_df, self.sample_df[cols]], axis=1)
+			print(f"Writing ATOMM phenotype file to: {outpath}")
+			ATOMM_df.to_csv(outpath, index=False, header=False, sep=" ")
 
 
 	def to_pheno(self, outpath, cols, id_cols=["Microchip"], vcf_chip=True, sep="\t"):
@@ -799,7 +818,7 @@ class TumorSamples(Samples):
 	# 			  - The calculated dates often do not match up with Margres et al. (2018) table S1.
 	# 			  - Attempt to change the calculation using the sum of all tumor volumes on the min trap date.
 	# 			  - Use the Compare class to test calculation similarities
-	def survival_proxy(self, day_cutoff=40, proxy=True, verbose_merge=False, handle_date="smaller"):
+	def survival_proxy(self, day_cutoff=40, proxy=True, verbose_merge=False, handle_date="smaller", vol_mode="max"):
 		tmp_tumor_df = self.tumor_df[["Microchip", "TrapDate", "TumourDepth", "TumourLength", "TumourWidth"]].copy()
 		tmp_tumor_df["TrapDate"] = pd.to_datetime(tmp_tumor_df["TrapDate"])
 		
@@ -808,7 +827,7 @@ class TumorSamples(Samples):
 		self.failed_date_delta = pd.Series(tmp_tumor_df[tmp_tumor_df["date_diff"] < day_cutoff]["Microchip"].unique())
 		tmp_tumor_df = tmp_tumor_df[tmp_tumor_df["date_diff"] >= day_cutoff]
 
-		dates_df = self.__init_tumor_date(tmp_tumor_df, proxy, handle_date)
+		dates_df = self.__init_tumor_date(tmp_tumor_df, proxy, handle_date, vol_mode=vol_mode)
 		last_trap = tmp_tumor_df.groupby("Microchip")["TrapDate"].max().loc[dates_df.index]
 		devil_survival_days = last_trap - dates_df["init_tumor_date"]
 		
@@ -851,8 +870,69 @@ class TumorSamples(Samples):
 			return None
 
 
-	def get_sample_tumors(self, stats=False, date_tolerance=None, id_match=True, inplace=True):
-		sample_subset = self.sample_df[self.sample_df["Microchip"].isin(self.tumor_df["Microchip"])]
+	# Definition: 
+	# 			  Subset the tumor_df to include just the tumors sequenced in the sample_df. Ideally, every sample_df tumor sample will exactly match a single
+	# 			  tumor_df tumor in 4 columns: Microchip, TumourNumber, TumourID, and TrappingDate. I consider a tumor's Microchip and TumourNumber to be
+	# 			  its primary identifiers such that a failure to match either of these indicates the tumor is missing from tumor_df. Further validation,
+	# 			  and importantly for phenotypes selection of the proper TrappingDate, is provided by matching TrappingDate and TumourID. However, in
+	# 			  some cases a mismatch of one or both of these occurs. For example, it is possible that a tumor matches its TumourID but has a TrappingDate
+	# 			  differing by hundreds of days. This method was designed to dynamically extract tumors considering these inconsistencies such that
+	# 			  tumors may be extracted just by matching closest dates irrespective of TumourID mismatches, extract based on TumourID matches irrespective
+	# 			  of TrappingDate mismatches, or extract based on the TrappingDate where TumourIDs match. Any tumors with missing TumourIDs (either in the
+	# 			  tumor_df or sample_df) are extracted based solely upon TrappingDate matches.
+	# Arguments:
+	# 			  date_tolerance: The number of days TrappingDate mismatches can differ before dropping the sample. "None" means samples will not
+	# 							  be dropped based on date differences whereas "0" means any sample with differing TrappingDates will be dropped
+	# 			  id_match:		  Indicates any samples with matching TumourIDs will be retained irrespective of differences in TrappingDates
+	# 			  closest_date:	  Indicates TrappingDate differences will be considered only for samples with the closest dates, irrespective of
+	# 							  TumourID matches. Setting this to False will use the TrappingDate of the matching TumourID (if a match exists),
+	# 							  even if this date is not closest to the sample_df TrappingDate
+	# 			  specific_tumor: Indicates if *just* the single matching tumor should be extracted (this is likely less useful for most phenotypes)
+	# 			  stats: 		  Print extraction stats
+	# 			  inplace:		  Replace the tumor_df with the extracts (returns them otherwise)
+	# Returns:
+	# 			  Extracted tumors if inplace=False
+	# Steps:
+	# 			  1) Get just the samples in sample_df (and remove trailing A/B TumourNumber IDs) which have a tumor_df entry and intialize a bunch of lists
+	# 			  2) Loop through every one of these sample_df samples
+	# 			  === LOOP START ===
+	# 			  3) Obtain the tumor_df entry (or entries) which matches the current sample_df entry's Microchip and TumourNumber
+	# 			  	3a) If no tumor_df entry is found, save the sample_df index in not_found_indices and continue to the next sample_df sample
+	# 			  	3b) If the current sample_df entry lacks a TrappingDate, print its mchip and continue (this should not occur) <- THIS SHOULD MAYBE RAISE AN EXCEPTION
+	# 			  4) Obtain the absolute value of the difference in days between the tumor_df and sample_df match TrappingDate
+	# 			  5) Attempt to match the sample_df TumourID (if it exists) with the tumor_df TumourID
+	# 			  6) Determine the index of tumor_df TrappingDate which is closest to the sample_df TrappingDate
+	# 				 If specific_tumor=True, make this single index what's extracted from the tumor_df. Otherwise, make all matching mchip/TumourNumbers the extracted indices
+	# 			  7) If the tumor_df and sample_df TrappingDates are different, save the index of both the sample_df and a single tumor_df to separate lists.
+	# 				 If closest_date=False, the matching TumourID sample TrappingDate from tumor_df is used (and if specific_tumor=True, this becomes the extracted tumor).
+	# 			  8) If the difference in TrappingDates is within date_tolerance, the matching tumor(s) is/are extracted
+	# 			  9) If id_match=True and a matching TumourID was found, the tumor(s) is/are extracted (overrides date_tolerance)
+	# 			  10) Otherwise, no tumor is extracted from the tumor_df
+	# 			  === LOOP END ===
+	# 			  11) Extracted tumors are pulled from tumor_df via index, unextracted tumors are pulled from sample_df via index, and the date mismatches (even for tumors which
+	# 			  	  were extracted) are pulled both from sample_df and tumor_df and are then merged. If closest_date=True, the *single* tumor_df sample, and corresponding date_diff,
+	# 			  	  represent the tumor_df closest in TrappingDate to the sample_df TrappingDate. Otherwise, if a matching TumourID is found, the tumor_df sample and date_diff
+	# 				  represent the matching TumourID tumor_df sample
+	# 			  12) Print the failed date_tolerance extracts and myriad extract stats if stats=True
+	# GOTCHAS:
+	# 			  - If a perfectly matching TrappingDate is found in tumor_df, this is considered a true match even if the TumourIDs differ
+	# 			  - Toggling closest_date=False can result in failed extracts if id_match=False which would otherwise be successful. This only
+	# 				occurs when the tumor_df has multiple TrappingDates and a matching TumourID with a date further than the sample_df date:
+	# 				=== closest_tumor=True, id_match=False ===
+	# 				Removing 18 samples with differences in dates greater than the tolerance (date_tolerance=50)
+    # 					  Microchip TumourNumber TumourID_sample TrapDate_sample TumourID_DB TrapDate_DB  date_diff
+	# 				982009106029805            1             610      2012-03-01         708  2012-03-06          5
+	# 				=== closest_tumor=False, id_match=False ===
+	# 				Removing 33 samples with differences in dates greater than the tolerance (date_tolerance=50)
+    # 					  Microchip TumourNumber TumourID_sample TrapDate_sample TumourID_DB TrapDate_DB  date_diff
+	# 				982009106029805            1             610      2012-03-01         610  2011-11-10        112
+	# TODO:
+	# 			  - See Step 3b about missing sample_df TrappingDates raising an exception
+	# 			  - This is a big, unwieldy mess. Try and clean it up some
+	# 			  - Optimize, the loop is inefficient (time tests to see if this is really inefficient and thus necessary)
+	def get_sample_tumors(self, date_tolerance=None, id_match=False, closest_date=True, specific_tumor=False, stats=False, inplace=True):
+		sample_subset = self.sample_df[self.sample_df["Microchip"].isin(self.tumor_df["Microchip"])].copy()
+		sample_subset["TumourNumber"] = sample_subset["TumourNumber"].str.replace(r"[a-zA-Z]$", "", regex=True)
 		sample_tumors = sample_subset[["Microchip", "TumourNumber", "TumourID", "TrappingDate"]]
 		found_indices = []
 		not_found_indices = []
@@ -869,18 +949,22 @@ class TumorSamples(Samples):
 				continue
 			if pd.isnull(current_sample["TrappingDate"]):
 				print(current_sample["Microchip"])
+				continue
 			date_diff = abs(current_sample["TrappingDate"] - found_tumor[["TrapDate"]])
 			diff_val = date_diff["TrapDate"].min().days
 			tumor_id_match = found_tumor[found_tumor["TumourID"] == current_sample["TumourID"]]
-			found_index = [date_diff.idxmin()[0]]
-			if np.isnan(found_index):
-				nan_traps.append(current_sample["Microchip"])
-				continue
+			closest_date_index = [date_diff.idxmin()[0]]
+			if specific_tumor:
+				found_index = closest_date_index
+			else:
+				found_index = found_tumor.index.tolist()
 			if diff_val > 0:
-				if tumor_id_match.size > 0:
-					found_index = tumor_id_match.index.tolist()
+				if tumor_id_match.size > 0 and not closest_date:
+					closest_date_index = tumor_id_match.index.tolist()
+					if specific_tumor:
+						found_index = closest_date_index
 					diff_val = abs(tumor_id_match["TrapDate"] - current_sample["TrappingDate"]).iloc[0].days
-				date_mismatch_tumor += found_index
+				date_mismatch_tumor += closest_date_index
 				date_mismatch_sample.append(current_sample.name)
 				mismatch_vals.append(diff_val)
 			if not date_tolerance or diff_val <= date_tolerance:
@@ -892,7 +976,7 @@ class TumorSamples(Samples):
 		extracted = self.tumor_df.loc[found_indices]
 		unextracted_tumors = self.sample_df.loc[not_found_indices]
 		mismatch_tumor = self.tumor_df.loc[date_mismatch_tumor][["Microchip", "TumourNumber", "TumourID", "TrapDate"]]
-		mismatch_sample = self.sample_df.loc[date_mismatch_sample][["Microchip", "TumourNumber", "TumourID", "TrappingDate"]]
+		mismatch_sample = sample_subset.loc[date_mismatch_sample][["Microchip", "TumourNumber", "TumourID", "TrappingDate"]]
 		tumor_date_mismatches = mismatch_sample.merge(mismatch_tumor, on=["Microchip", "TumourNumber"])
 		tumor_date_mismatches = tumor_date_mismatches.rename(columns={"TumourID_x": "TumourID_sample", "TrappingDate": "TrapDate_sample", "TumourID_y": "TumourID_DB", "TrapDate": "TrapDate_DB"})
 		tumor_date_mismatches["date_diff"] = mismatch_vals
@@ -902,11 +986,13 @@ class TumorSamples(Samples):
 			mismatch_days = tumor_date_mismatches["date_diff"]
 			not_extracted = unextracted_tumors["Microchip"].unique()[:3]
 			total_mismatch = tumor_date_mismatches[tumor_date_mismatches["TumourID_sample"] != tumor_date_mismatches["TumourID_DB"]]
-			print(f"To extract: {sample_subset.shape[0]}")
-			print(f"Extracted: {extracted.shape[0]}")
-			print(f"Not extracted: {sample_subset.shape[0] - extracted.shape[0]}")
+			to_extract_n = len(sample_subset["Microchip"].unique())
+			extracted_n = len(extracted["Microchip"].unique())
+			print(f"To extract: {to_extract_n}")
+			print(f"Extracted: {extracted_n}")
+			print(f"Not extracted: {to_extract_n - extracted_n}")
 			print(f"NaN TrappingDate (sample_df): {len(nan_traps)}")
-			print(f"Number of matching trap dates: {extracted.shape[0] - len(mismatch_days)}")
+			print(f"Number of matching trap dates: {extracted_n - len(mismatch_days)}")
 			print(f"Number of date mismatches: {len(mismatch_days)}")
 			print(f"Number of date mismatches with no tumourID: {len(total_mismatch)}")
 			print(f"Mean date mismatch (days): {round(sum(mismatch_days)/len(mismatch_days))}")
@@ -976,7 +1062,7 @@ class TumorSamples(Samples):
 		before = self.tumor_df.shape[0]
 		self.tumor_df = self.tumor_df[self.tumor_df["Microchip"].isin(sample_mchip)]
 		after = self.tumor_df.shape[0]
-		print(f"Removed {before-after} tumor samples ({after} tumor samples remaining)")
+		print(f"*sync_tumor_df()* Removed {before-after} tumor samples ({after} tumor samples remaining)")
 
 
 	# === ANALYSIS PHENOTYPE ===
@@ -1031,6 +1117,30 @@ class TumorSamples(Samples):
 		num_tumors = num_tumors.to_frame().reset_index()
 		num_tumors = num_tumors.rename(columns={"TumourNumber": "tumor_count"})
 		self.sample_df = self.sample_df.merge(num_tumors, how="left", on="Microchip")
+
+
+	def tumor_growth(self, verbose_merge=False):
+		tmp_tumor_df = self.tumor_df[["Microchip", "TrapDate", "TumourDepth", "TumourLength", "TumourWidth"]].copy()
+		tmp_tumor_df = tmp_tumor_df.dropna(subset=["TumourDepth", "TumourLength", "TumourWidth"])
+		date_counts = tmp_tumor_df.groupby(["Microchip"])["TrapDate"].nunique()
+		date_counts = date_counts[date_counts > 1]
+		multi_traps = tmp_tumor_df.loc[tmp_tumor_df["Microchip"].isin(date_counts.index)]
+		multi_traps = multi_traps.assign(vol=(multi_traps["TumourDepth"] * multi_traps["TumourLength"] * multi_traps["TumourWidth"]))
+		multi_traps["date_diff"] = multi_traps.groupby("Microchip")["TrapDate"].transform(lambda x: x.max() - x.min())
+		vols = multi_traps.groupby(["Microchip", "TrapDate"])["vol"].sum()
+		vols /= 1000
+		vol_diff = vols.groupby(level="Microchip").transform(lambda x: (x.max() - x.min()))
+		multi = vols.reset_index().groupby("Microchip")["TrapDate"].nunique()
+		multi = multi[multi > 2].index
+		vol_diff = vol_diff.groupby(level="Microchip").first()
+		date_diff = multi_traps.groupby("Microchip")["date_diff"].first().dt.days
+		date_diff = date_diff.to_frame()
+		diff_df = date_diff.join(vol_diff)
+		diff_df["tumor_growth_rate"] = diff_df["vol"] / diff_df["date_diff"]
+		if not verbose_merge:
+			diff_df = diff_df["tumor_growth_rate"]
+		diff_df = diff_df.reset_index()
+		self.sample_df = self.sample_df.merge(diff_df, on="Microchip", how="left")
 
 
 	def __drop_DFTG(self, df, min_score):
@@ -1177,12 +1287,12 @@ class TumorSamples(Samples):
 	# 			  9) Handle these odd samples by dropping them, ignoring them and utilizing the back calc, or utilizing the min observed date
 	# 			  PROXY
 	# 			  4) Rename "min_obs_date" (minimum trap date, which considers NA volume rows, obtained from __min_cap_volume) to "init_tumor_date"
-	def __init_tumor_date(self, tumor_df, proxy_flag, handle_date="smaller"):
+	def __init_tumor_date(self, tumor_df, proxy_flag, handle_date="smaller", vol_mode="max"):
 		handle_date_list = ["drop", "ignore", "smaller"]
-		proxy = self.__min_cap_volume(tumor_df, False)
+		proxy = self.__min_cap_volume(tumor_df, False, mode=vol_mode)
 		proxy = proxy.drop(columns=["tumor_volume"])
 		proxy.columns = ["min_obs_date"]
-		estimate = self.__min_cap_volume(tumor_df, True)
+		estimate = self.__min_cap_volume(tumor_df, True, mode=vol_mode)
 		estimate["tumor_volume"] /= 1000
 		if not proxy_flag:
 			back_calc = self.__growth_back_calculation(estimate["tumor_volume"], is_cm=True)
